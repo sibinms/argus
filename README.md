@@ -57,7 +57,7 @@ jobs:
       contents: read
       pull-requests: write
     steps:
-      - uses: sibinms/argus@v1.2.1
+      - uses: sibinms/argus@v1.2.2
         with:
           anthropic-api-key: ${{ secrets.ANTHROPIC_API_KEY }}
 ```
@@ -67,7 +67,7 @@ supports — set the model strings in `.argus/config.yml` and pass that
 provider's own key via the step's `env:` instead of `anthropic-api-key`:
 
 ```yaml
-      - uses: sibinms/argus@v1.2.1
+      - uses: sibinms/argus@v1.2.2
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
 ```
@@ -84,7 +84,7 @@ provider's own key via the step's `env:` instead of `anthropic-api-key`:
 ### 2. CLI (local runs)
 
 ```bash
-pip install "git+https://github.com/sibinms/argus.git@v1.2.1"
+pip install "git+https://github.com/sibinms/argus.git@v1.2.2"
 argus init                 # writes .argus/config.yml
 export ANTHROPIC_API_KEY=sk-...   # or OPENAI_API_KEY, GEMINI_API_KEY, ... — whatever
                                    # provider the models in .argus/config.yml point at
@@ -278,7 +278,7 @@ pytest
 
 ## Releases
 
-Tags follow semver (`v1.2.1`, ...). Pin the Action to a specific tag rather
+Tags follow semver (`v1.2.2`, ...). Pin the Action to a specific tag rather
 than `@main` — `@main` tracks whatever's newest, including changes to lens
 prompts or curator behaviour that could shift what gets posted on your PRs.
 See [Releases](https://github.com/sibinms/argus/releases) for the changelog
