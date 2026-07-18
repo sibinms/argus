@@ -79,16 +79,11 @@ def load_config(path: Path | None = None) -> Config:
             max_bytes_per_file=context_raw.get(
                 "max_bytes_per_file", ContextConfig.max_bytes_per_file
             ),
-            include_neighbors=context_raw.get(
-                "include_neighbors", ContextConfig.include_neighbors
-            ),
-            ignore_globs=context_raw.get("ignore_globs")
-            or ContextConfig().ignore_globs,
+            include_neighbors=context_raw.get("include_neighbors", ContextConfig.include_neighbors),
+            ignore_globs=context_raw.get("ignore_globs") or ContextConfig().ignore_globs,
         ),
         posting=PostingConfig(
-            min_confidence=posting_raw.get(
-                "min_confidence", PostingConfig.min_confidence
-            ),
+            min_confidence=posting_raw.get("min_confidence", PostingConfig.min_confidence),
             show_dropped_reasoning=posting_raw.get(
                 "show_dropped_reasoning", PostingConfig.show_dropped_reasoning
             ),

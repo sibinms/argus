@@ -10,6 +10,7 @@ attached to a line.
 from __future__ import annotations
 
 from github import Github
+from github.PullRequest import ReviewComment
 
 from argus.config import PostingConfig
 from argus.lenses.base import Finding
@@ -40,9 +41,10 @@ def post_to_github(
     postable = postable_findings(findings, posting)
     line_findings = [f for f in postable if f.file and f.line]
 
-    comments = [
+    comments: list[ReviewComment] = [
         {"path": f.file, "line": f.line, "side": "RIGHT", "body": _comment_body(f)}
         for f in line_findings
+        if f.file is not None and f.line is not None
     ]
 
     summary = render_markdown(findings, posting)

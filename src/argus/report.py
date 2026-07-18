@@ -16,8 +16,7 @@ def postable_findings(findings: list[Finding], posting: PostingConfig) -> list[F
     return [
         f
         for f in findings
-        if f.status in ("kept", "downgraded")
-        and _CONFIDENCE_RANK.get(f.confidence, 0) >= threshold
+        if f.status in ("kept", "downgraded") and _CONFIDENCE_RANK.get(f.confidence, 0) >= threshold
     ]
 
 

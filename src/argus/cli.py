@@ -49,9 +49,19 @@ def init():
 
 @main.command()
 @click.option("--config", "config_path", type=click.Path(path_type=Path), default=None)
-@click.option("--github", is_flag=True, help="Fetch context from a GitHub PR instead of a local diff.")
-@click.option("--repo", default=None, help="owner/repo, required with --github unless running in Actions.")
-@click.option("--pr", "pr_number", type=int, default=None, help="PR number, required with --github unless running in Actions.")
+@click.option(
+    "--github", is_flag=True, help="Fetch context from a GitHub PR instead of a local diff."
+)
+@click.option(
+    "--repo", default=None, help="owner/repo, required with --github unless running in Actions."
+)
+@click.option(
+    "--pr",
+    "pr_number",
+    type=int,
+    default=None,
+    help="PR number, required with --github unless running in Actions.",
+)
 @click.option("--base", default="origin/main", help="Base ref for a local diff.")
 @click.option("--head", default="HEAD", help="Head ref for a local diff.")
 @click.option("--mode", "mode_override", type=click.Choice(["shadow", "active"]), default=None)
@@ -82,7 +92,9 @@ def review(config_path, github, repo, pr_number, base, head, mode_override):
         post_to_github(repo, pr_number, token, findings, config.posting)
         click.echo(f"Posted review to {repo}#{pr_number}.")
     elif config.is_active and not github:
-        click.echo("mode: active has no effect without --github (there's no PR to post to) — writing a local report instead.")
+        click.echo(
+            "mode: active has no effect without --github (there's no PR to post to) — writing a local report instead."
+        )
 
     markdown = write_shadow_report(findings, config.posting)
     click.echo(markdown)

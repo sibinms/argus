@@ -157,13 +157,23 @@ def curate_with_model(
         # If the curator's own output is unparseable, keep everything rather
         # than silently dropping findings we can't account for.
         return [
-            {"action": "keep", "confidence": f.confidence, "reason": "curator output unparseable", "evidence_quote": None}
+            {
+                "action": "keep",
+                "confidence": f.confidence,
+                "reason": "curator output unparseable",
+                "evidence_quote": None,
+            }
             for f in findings
         ]
 
     if len(decisions) != len(findings):
         return [
-            {"action": "keep", "confidence": f.confidence, "reason": "curator returned mismatched count", "evidence_quote": None}
+            {
+                "action": "keep",
+                "confidence": f.confidence,
+                "reason": "curator returned mismatched count",
+                "evidence_quote": None,
+            }
             for f in findings
         ]
 

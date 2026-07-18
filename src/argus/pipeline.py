@@ -19,9 +19,7 @@ def run_review(context: Context, config: Config) -> list[Finding]:
 
     all_findings: list[Finding] = []
     with ThreadPoolExecutor(max_workers=max(len(lenses), 1)) as executor:
-        futures = [
-            executor.submit(run_lens, lens, context, config.models.lens) for lens in lenses
-        ]
+        futures = [executor.submit(run_lens, lens, context, config.models.lens) for lens in lenses]
         for future in futures:
             all_findings.extend(future.result())
 

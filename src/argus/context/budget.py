@@ -28,7 +28,10 @@ def apply_budget(files: list, config: ContextConfig) -> list:
             continue
         content = f.content
         truncated = False
-        if content is not None and len(content.encode("utf-8", "ignore")) > config.max_bytes_per_file:
+        if (
+            content is not None
+            and len(content.encode("utf-8", "ignore")) > config.max_bytes_per_file
+        ):
             content = content.encode("utf-8", "ignore")[: config.max_bytes_per_file].decode(
                 "utf-8", "ignore"
             )
