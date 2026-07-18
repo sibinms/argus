@@ -1,0 +1,47 @@
+name: "Argus PR Review"
+description: "Reviews pull requests with a panel of narrow lenses and a citation-checked curator"
+branding:
+  icon: "eye"
+  color: "purple"
+
+inputs:
+  anthropic-api-key:
+    description: "Anthropic API key used to run the lenses and curator"
+    required: true
+  github-token:
+    description: "Token used to read the PR and, in active mode, post comments"
+    required: false
+    default: ${{ github.token }}
+  mode:
+    description: "shadow or active; overrides .argus/config.yml when set"
+    required: false
+    default: ""
+
+runs:
+  using: "composite"
+  steps:
+    - uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+
+    - uses: actions/setup-python@v5
+      with:
+        python-version: "3.12"
+
+    - name: Install Argus
+      shell: bash
+      working-directory: ${{ github.action_path }}
+      run: pip install .
+
+    - name: Run review
+      shell: bash
+      env:
+        ANTHROPIC_API_KEY: ${{ inputs.anthropic-api-key }}
+        GITHUB_TOKEN: ${{ inputs.github-token }}
+        ARGUS_MODE: ${{ inputs.mode }}
+      run: |
+        args=(--github)
+        if [ -n "$ARGUS_MODE" ]; then
+          args+=(--mode "$ARGUS_MODE")
+        fi
+        argus review "${args[@]}"

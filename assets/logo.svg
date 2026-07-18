@@ -1,0 +1,29 @@
+<svg viewBox="0 0 240 240" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Argus logo">
+  <defs>
+    <linearGradient id="argusBg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#4f46e5"/>
+      <stop offset="100%" stop-color="#7c3aed"/>
+    </linearGradient>
+  </defs>
+  <circle cx="120" cy="120" r="116" fill="url(#argusBg)"/>
+
+  <!-- shield -->
+  <path d="M120 40 L182 62 V116 C182 158 156 188 120 202 C84 188 58 158 58 116 V62 Z"
+        fill="none" stroke="#ffffff" stroke-width="6" stroke-linejoin="round"/>
+
+  <!-- five eyes: one central, four smaller -->
+  <g fill="#ffffff">
+    <ellipse cx="120" cy="108" rx="20" ry="13"/>
+    <ellipse cx="86" cy="132" rx="13" ry="9"/>
+    <ellipse cx="154" cy="132" rx="13" ry="9"/>
+    <ellipse cx="98" cy="160" rx="10" ry="7"/>
+    <ellipse cx="142" cy="160" rx="10" ry="7"/>
+  </g>
+  <g fill="#4f46e5">
+    <circle cx="120" cy="108" r="7"/>
+    <circle cx="86" cy="132" r="4.5"/>
+    <circle cx="154" cy="132" r="4.5"/>
+    <circle cx="98" cy="160" r="3.5"/>
+    <circle cx="142" cy="160" r="3.5"/>
+  </g>
+</svg>

@@ -1,0 +1,31 @@
+# Copy this file to .argus/config.yml and adjust for your repo.
+
+# shadow: never posts, only writes a report (see `posting.shadow`)
+# active: posts inline comments + a verdict on the pull request
+mode: shadow
+
+models:
+  lens: claude-haiku-4-5      # cheap, high-volume — asked to over-report
+  curator: claude-opus-4-8     # expensive, precise — can only drop a finding by citing evidence
+
+# Built-in lenses: security, tests, error_handling, contracts
+# Add your own by pointing at a markdown file, see docs/writing-a-lens.md
+lenses:
+  - security
+  - tests
+  - error_handling
+  - contracts
+  # - custom: .argus/lenses/payment-safety.md
+
+context:
+  max_files: 15
+  max_bytes_per_file: 20000
+  include_neighbors: false   # off by default — usage context caused false reassurance in testing
+  ignore_globs:
+    - "*.lock"
+    - "*.min.js"
+    - "*/migrations/*"
+
+posting:
+  min_confidence: medium   # low | medium | high
+  show_dropped_reasoning: true

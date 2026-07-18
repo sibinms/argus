@@ -1,0 +1,17 @@
+diff --git a/src/orders/notify.py b/src/orders/notify.py
+index e69de29..4b825dc 100644
+--- a/src/orders/notify.py
++++ b/src/orders/notify.py
+@@ -10,6 +10,12 @@ def send_order_confirmation(order):
+     customer = order.customer
+     return _send_email(customer.email, template="order_confirmation", order=order)
+
+
++def send_shipping_update(order):
++    customer = order.customer
++    address = customer.profile.shipping_address
++    return _send_email(customer.email, template="shipping_update", address=address.formatted())
++
++
+ def _send_email(to, template, **context):
+     ...

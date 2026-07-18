@@ -1,0 +1,9 @@
+title: "Add shipping update notification email"
+description: "Sends customers an email when their order ships."
+bugs:
+  - id: missing-null-check
+    file: src/orders/notify.py
+    hint: "customer profile or shipping address could be None, causing an AttributeError when formatted is called on it"
+  - id: missing-test
+    file: src/orders/notify.py
+    hint: "no test was added for the new send_shipping_update function"

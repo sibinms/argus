@@ -1,0 +1,9 @@
+title: "Allow partial name search on merchant lookup"
+description: "Lets support staff search merchants by partial name match."
+bugs:
+  - id: sql-injection
+    file: src/reports/search.py
+    hint: "user controlled name is interpolated directly into the SQL string instead of a parameterized query, allowing SQL injection"
+  - id: missing-test
+    file: src/reports/search.py
+    hint: "no test covers the new query building, especially with special characters in name"

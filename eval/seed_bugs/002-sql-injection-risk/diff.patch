@@ -1,0 +1,10 @@
+diff --git a/src/reports/search.py b/src/reports/search.py
+index 1111111..2222222 100644
+--- a/src/reports/search.py
++++ b/src/reports/search.py
+@@ -22,7 +22,8 @@ def find_merchant_by_name(cursor, name):
+-    query = "SELECT * FROM merchants WHERE name = %s"
+-    cursor.execute(query, (name,))
++    query = f"SELECT * FROM merchants WHERE name = '{name}'"
++    cursor.execute(query)
+     return cursor.fetchall()
