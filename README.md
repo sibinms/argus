@@ -107,7 +107,7 @@ jobs:
       contents: read
       pull-requests: write
     steps:
-      - uses: sibinms/argus@v0.2.0
+      - uses: sibinms/argus@v1.0.0
         with:
           anthropic-api-key: ${{ secrets.ANTHROPIC_API_KEY }}
 ```
@@ -178,7 +178,7 @@ pytest
 
 ## Releases
 
-Tags follow semver (`v0.2.0`, ...). Pin the Action to a specific tag rather
+Tags follow semver (`v1.0.0`, ...). Pin the Action to a specific tag rather
 than `@main` — `@main` tracks whatever's newest, including changes to lens
 prompts or curator behaviour that could shift what gets posted on your PRs.
 See [Releases](https://github.com/sibinms/argus/releases) for the changelog
