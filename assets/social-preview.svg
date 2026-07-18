@@ -1,0 +1,37 @@
+<svg viewBox="0 0 1280 640" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Argus social preview">
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#4f46e5"/>
+      <stop offset="100%" stop-color="#7c3aed"/>
+    </linearGradient>
+  </defs>
+
+  <rect width="1280" height="640" fill="url(#bg)"/>
+
+  <!-- logo, scaled and positioned left of center -->
+  <g transform="translate(24,104) scale(1.8)">
+    <path d="M120 40 L182 62 V116 C182 158 156 188 120 202 C84 188 58 158 58 116 V62 Z"
+          fill="none" stroke="#ffffff" stroke-width="6" stroke-linejoin="round"/>
+    <g fill="#ffffff">
+      <ellipse cx="120" cy="108" rx="20" ry="13"/>
+      <ellipse cx="86" cy="132" rx="13" ry="9"/>
+      <ellipse cx="154" cy="132" rx="13" ry="9"/>
+      <ellipse cx="98" cy="160" rx="10" ry="7"/>
+      <ellipse cx="142" cy="160" rx="10" ry="7"/>
+    </g>
+    <g fill="#4f46e5">
+      <circle cx="120" cy="108" r="7"/>
+      <circle cx="86" cy="132" r="4.5"/>
+      <circle cx="154" cy="132" r="4.5"/>
+      <circle cx="98" cy="160" r="3.5"/>
+      <circle cx="142" cy="160" r="3.5"/>
+    </g>
+  </g>
+
+  <!-- wordmark + tagline -->
+  <g font-family="Helvetica, Arial, sans-serif" fill="#ffffff">
+    <text x="520" y="310" font-size="104" font-weight="700">Argus</text>
+    <text x="524" y="368" font-size="30" fill="#e9e5ff">An AI PR reviewer built from many narrow</text>
+    <text x="524" y="406" font-size="30" fill="#e9e5ff">lenses and one careful, evidence-checked curator.</text>
+  </g>
+</svg>
