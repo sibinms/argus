@@ -84,12 +84,24 @@ provider's own key via the step's `env:` instead of `anthropic-api-key`:
 ### 2. CLI (local runs)
 
 ```bash
-pip install argus-review
+pip install "git+https://github.com/sibinms/argus.git@v1.2.1"
 argus init                 # writes .argus/config.yml
 export ANTHROPIC_API_KEY=sk-...   # or OPENAI_API_KEY, GEMINI_API_KEY, ... — whatever
                                    # provider the models in .argus/config.yml point at
 argus review --base origin/main --head HEAD
 ```
+
+Not on PyPI yet — installing straight from a tagged commit keeps this
+pinned the same way the Action example above is. (If you're wondering why
+not `pip install argus-review`: that name's already taken on PyPI by an
+unrelated project, so ours would publish under `argus-pr-review` instead,
+once it's there.)
+
+> If that install fails with a Rust/`maturin` build error, it's a transitive
+> dependency (`tokenizers`, via litellm) trying to compile from source
+> because no prebuilt wheel matched your platform/Python version. Add
+> `--only-binary=:all:` to the pip command above, or run `rustup update`
+> first if you'd rather build it.
 
 This runs against a local diff and writes `argus-report.md`. Posting only
 ever happens when there's a real PR to post to (`--github`), so a local run
