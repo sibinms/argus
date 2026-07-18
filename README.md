@@ -62,17 +62,19 @@ Pull Request
  Context Builder
       │
       ▼
- ┌───────────────────────────────┐
- │ Security │ Tests │ Contracts │
- │ Errors   │ Performance │ ... │
- └───────────────────────────────┘
+ ┌─────────────────────────────────────────┐
+ │ Security │ Tests │ Errors │ Contracts │ … │   ← lenses, in parallel
+ └─────────────────────────────────────────┘
              │
              ▼
-      Evidence Curator
+      Evidence Curator                          ← drops only with a cited quote
              │
              ▼
  GitHub Review + Verdict
 ```
+
+The four lenses above ship built-in. The `…` is you: add your own as
+plain Markdown (see [Writing Custom Lenses](#writing-custom-lenses)).
 
 ------------------------------------------------------------------------
 
@@ -107,19 +109,41 @@ Pull Request
 
 ### GitHub Action
 
+Pick your provider. Pass that provider's key, then point
+`.argus/config.yml` at a matching model.
+
+**Anthropic**
+
+``` yaml
+- uses: sibinms/argus@v1.2.3
+  with:
+    anthropic-api-key: ${{ secrets.ANTHROPIC_API_KEY }}
+```
+
+**OpenAI**
+
 ``` yaml
 - uses: sibinms/argus@v1.2.3
   env:
     OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
 ```
 
-Create:
+**Gemini**
 
-``` text
-.argus/config.yml
+``` yaml
+- uses: sibinms/argus@v1.2.3
+  env:
+    GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
 ```
 
-Choose your preferred models and run the workflow.
+Any other provider [LiteLLM](https://docs.litellm.ai/docs/providers)
+supports works the same way: that provider's env var, that provider's
+model string. Lens and curator can each use a different one.
+
+> **`mode: active` is the default.** Argus posts real inline comments
+> and a verdict on the first PR it runs on. Set `mode: shadow` in
+> `.argus/config.yml` to generate a report without commenting until
+> you're happy with what it finds.
 
 ------------------------------------------------------------------------
 
@@ -130,10 +154,14 @@ pip install "git+https://github.com/sibinms/argus.git@v1.2.3"
 
 argus init
 
-export OPENAI_API_KEY=...
+export ANTHROPIC_API_KEY=...   # or OPENAI_API_KEY, GEMINI_API_KEY, ...
 
 argus review --base origin/main --head HEAD
 ```
+
+Not on PyPI yet, so install from the tagged commit. If it fails with a
+Rust/`maturin` build error, add `--only-binary=:all:` to the `pip`
+command (a LiteLLM dependency is trying to build from source).
 
 ------------------------------------------------------------------------
 
@@ -190,7 +218,7 @@ Look for:
 Ignore stylistic issues.
 ```
 
-No Python required.
+No Python required. Full guide: [`docs/writing-a-lens.md`](docs/writing-a-lens.md).
 
 ------------------------------------------------------------------------
 
@@ -238,16 +266,19 @@ Your chosen LLM provider receives only the context required for review.
 
 Pull requests are welcome.
 
-Before submitting changes:
+Before submitting changes, run the same checks CI enforces:
 
 ``` bash
-ruff check
+ruff check src tests eval scripts
+ruff format --check src tests eval scripts
+python scripts/check_readme_version.py
 mypy src
+bandit -r src && pip-audit --skip-editable
 pytest
-python eval/run_eval.py
 ```
 
-If you change prompts, include recall improvements where possible.
+If you change prompts, include recall improvements where possible
+(`python eval/run_eval.py`).
 
 ------------------------------------------------------------------------
 
