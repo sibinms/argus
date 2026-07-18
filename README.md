@@ -22,17 +22,116 @@ Most AI code reviewers are one cautious model doing two jobs at once:
 proposing problems, and deciding which ones are real. Caution wins, and the
 reviewer goes quiet — approving pull requests it never actually looked hard
 at, because it was never willing to write down the suspicion in the first
-place.
+place. Argus splits the two jobs: many narrow lenses propose freely, and one
+curator decides what survives, and can only prove a finding wrong, never just
+doubt it.
 
-Argus splits the two jobs:
+## Table of Contents
 
-- **Lenses** are small, narrow reviewers, each briefed on one angle
-  (security, missing tests, error handling, contract breaks, or whatever you
-  add). They run on a cheap model and are explicitly told to over-report.
-- **The curator** looks at everything the lenses raised, merges duplicates,
-  and can only drop a finding if it can quote real text from the diff that
-  contradicts it. "I doubt it" isn't a reason. If it can't back the claim,
-  the finding survives, downgraded rather than deleted.
+- [Quick Start](#quick-start)
+- [Why use Argus?](#why-use-argus)
+- [Features](#features)
+- [How it works](#how-it-works)
+- [Configuration](#configuration)
+- [Writing your own lenses](#writing-your-own-lenses)
+- [Measuring recall, not silence](#measuring-recall-not-silence)
+- [Data privacy](#data-privacy)
+- [Quality and security checks](#quality-and-security-checks)
+- [Releases](#releases)
+- [Design notes](#design-notes)
+- [Contributing](#contributing)
+
+## Quick Start
+
+### 1. GitHub Action (recommended)
+
+```yaml
+# .github/workflows/argus.yml
+name: Argus review
+on: pull_request
+
+jobs:
+  review:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - uses: sibinms/argus@v1.1.0
+        with:
+          anthropic-api-key: ${{ secrets.ANTHROPIC_API_KEY }}
+```
+
+> **Heads up: `mode: active` is the default.** As soon as this workflow runs
+> on a pull request, Argus posts real inline comments and a verdict (approve,
+> comment, or request changes) using the GitHub review API — there's no
+> separate opt-in step. If you want to see what it would say before it says
+> anything on a real PR, set `mode: shadow` in `.argus/config.yml` first: it
+> writes a job summary and changes nothing on the PR. Switch to `mode: active`
+> (or delete the line, since it's the default) once you're happy with what
+> it's finding.
+
+### 2. CLI (local runs)
+
+```bash
+pip install argus-review
+argus init                 # writes .argus/config.yml
+export ANTHROPIC_API_KEY=sk-...
+argus review --base origin/main --head HEAD
+```
+
+This runs against a local diff and writes `argus-report.md`. Posting only
+ever happens when there's a real PR to post to (`--github`), so a local run
+like this never touches anything — it's a safe way to read the panel's
+output before it's aimed at a real pull request.
+
+### 3. Other platforms
+
+GitHub is the only supported platform right now (GitHub Action + GitHub
+review API). GitLab/Bitbucket/Azure DevOps support isn't built — contributions
+welcome, see [Contributing](#contributing).
+
+## Why use Argus?
+
+- **Built to actually find things.** Every lens is explicitly told to
+  over-report, because a single cautious reviewer that never writes down a
+  suspicion also never catches the real bug behind it.
+- **Precision is enforced once, not everywhere.** The curator is the only
+  place a finding can be dropped, and it can't just be "unsure" — it has to
+  quote real text from the diff that contradicts the finding, or the finding
+  survives (downgraded, not deleted).
+- **Cheap where it should be, careful where it matters.** Lenses run on a
+  cheap model for volume; the curator can run on your strongest model, since
+  judgment — not generation — is where quality actually pays off.
+- **Measured, not vibes-checked.** `eval/run_eval.py` replays known bugs
+  through the full pipeline and reports recall, so a prompt or context change
+  is judged on whether it actually catches more, not on how it reads.
+- **Open, no vendor lock-in.** Bring your own Anthropic API key, run it as a
+  GitHub Action or the CLI, and read every prompt in `src/argus/lenses/builtin/`
+  — nothing about what it looks for is hidden.
+
+## Features
+
+| Lens | What it flags |
+|---|---|
+| `security` | Injection, broken auth, hardcoded secrets, unsafe deserialization, sensitive data in logs |
+| `tests` | New logic with no test, bug fixes with no regression test, weak assertions, silently skipped tests |
+| `error_handling` | Swallowed exceptions, missing timeouts, unreleased resources, retries with no idempotency |
+| `contracts` | Breaking API/schema changes, callers still using old assumptions, changed defaults |
+| *(yours)* | Anything — lenses are plain markdown, see [Writing your own lenses](#writing-your-own-lenses) |
+
+| Capability | Support |
+|---|---|
+| Shadow mode (report only, never posts) | ✅ |
+| Active mode (inline comments + verdict) | ✅ |
+| Evidence-checked curator (can't drop without a citation) | ✅ |
+| Custom lenses via markdown, no code | ✅ |
+| Recall eval harness against seed bugs | ✅ |
+| GitHub Action | ✅ |
+| CLI (local diffs) | ✅ |
+| GitLab / Bitbucket / Azure DevOps | ❌ (contributions welcome) |
+
+## How it works
 
 ```mermaid
 flowchart LR
@@ -63,63 +162,11 @@ flowchart LR
     curator --> out["posted findings<br/>+ verdict"]
 ```
 
-Lenses run in parallel and are told to over-report. The curator is the only
-place precision is enforced, and it can be checked — see
-[Design notes](#design-notes).
-
-## Contents
-
-- [Quick start](#quick-start)
-- [As a GitHub Action](#as-a-github-action)
-- [Configuration](#configuration)
-- [Writing your own lenses](#writing-your-own-lenses)
-- [Measuring recall, not silence](#measuring-recall-not-silence)
-- [Quality and security checks](#quality-and-security-checks)
-- [Releases](#releases)
-- [Design notes](#design-notes)
-- [Contributing](#contributing)
-
-## Quick start
-
-```bash
-pip install argus-review
-argus init                 # writes .argus/config.yml
-export ANTHROPIC_API_KEY=sk-...
-argus review --base origin/main --head HEAD
-```
-
-This runs against a local diff and writes `argus-report.md`. Posting only
-ever happens when there's a real PR to post to (`--github`), so a local run
-like this never touches anything — it's a safe way to read the panel's
-output before it's aimed at a real pull request.
-
-## As a GitHub Action
-
-```yaml
-# .github/workflows/argus.yml
-name: Argus review
-on: pull_request
-
-jobs:
-  review:
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      pull-requests: write
-    steps:
-      - uses: sibinms/argus@v1.0.0
-        with:
-          anthropic-api-key: ${{ secrets.ANTHROPIC_API_KEY }}
-```
-
-> **Heads up: `mode: active` is the default.** As soon as this workflow runs
-> on a pull request, Argus posts real inline comments and a verdict (approve,
-> comment, or request changes) using the GitHub review API — there's no
-> separate opt-in step. If you want to see what it would say before it says
-> anything on a real PR, set `mode: shadow` in `.argus/config.yml` first: it
-> writes a job summary and changes nothing on the PR. Switch to `mode: active`
-> (or delete the line, since it's the default) once you're happy with what
-> it's finding.
+Lenses run in parallel on a cheap model and are told to over-report. The
+curator — the only place precision is enforced — merges duplicates and can
+only drop a finding by quoting real text from the diff that contradicts it;
+see [Design notes](#design-notes) for why that's checked in code, not just
+asked for in a prompt.
 
 ## Configuration
 
@@ -153,6 +200,25 @@ have caught. Run the eval before and after any change to prompts, context
 budgets, or lenses. If a change doesn't move recall up, don't ship it on
 intuition alone.
 
+## Data privacy
+
+Argus is self-hosted in the sense that matters: it runs in *your* GitHub
+Action or *your* CLI, using *your* Anthropic API key, and it doesn't call
+home to any Argus-operated service — there isn't one.
+
+What that means in practice:
+
+- The diff, the changed files (subject to your `context` budget in
+  `.argus/config.yml`), and the PR title/description are sent to Anthropic's
+  API to run the lenses and curator. Nothing else leaves your CI runner or
+  machine.
+- Whether that data is used for model training is governed by Anthropic's own
+  API data usage policy, not by Argus — the same as any tool built on their
+  API.
+- Argus stores nothing itself: no database, no third-party logging, no
+  telemetry. The only output is the report file and, in active mode, the
+  comments it posts on your own PR via the GitHub token you provide.
+
 ## Quality and security checks
 
 Every push and pull request runs through
@@ -178,7 +244,7 @@ pytest
 
 ## Releases
 
-Tags follow semver (`v1.0.0`, ...). Pin the Action to a specific tag rather
+Tags follow semver (`v1.1.0`, ...). Pin the Action to a specific tag rather
 than `@main` — `@main` tracks whatever's newest, including changes to lens
 prompts or curator behaviour that could shift what gets posted on your PRs.
 See [Releases](https://github.com/sibinms/argus/releases) for the changelog
@@ -215,7 +281,9 @@ Issues and pull requests are welcome. If you're adding a lens, see
 [`docs/writing-a-lens.md`](docs/writing-a-lens.md) and run `eval/run_eval.py`
 before/after to show it moves recall. If you're changing curator or context
 behaviour, the same applies: the eval harness is the thing to check, not
-intuition.
+intuition. Support for other git platforms (GitLab, Bitbucket, Azure DevOps)
+is open territory — nothing in `src/argus/posting/` assumes GitHub beyond
+that one module.
 
 ## License
 
