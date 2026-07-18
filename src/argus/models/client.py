@@ -1,5 +1,14 @@
-"""Thin wrapper around the Anthropic API for the two model roles: running a
-lens (propose findings) and running the curator (verify or drop them).
+"""Thin wrapper around whichever LLM provider is configured, for the two
+model roles: running a lens (propose findings) and running the curator
+(verify or drop them).
+
+Uses litellm so any provider it supports works just by changing the model
+string in .argus/config.yml — "claude-haiku-4-5", "gpt-4o-mini",
+"gemini/gemini-1.5-flash", and so on. Argus has no provider-specific code;
+whichever provider a model string points at, set that provider's own API
+key as an environment variable (ANTHROPIC_API_KEY, OPENAI_API_KEY,
+GEMINI_API_KEY, ...) — see https://docs.litellm.ai/docs/providers for the
+full list. Lens and curator can each point at a different provider.
 
 Split deliberately: lenses are meant to run on a cheap model asked to
 over-report, the curator on a stronger model asked to only kill a finding
@@ -10,27 +19,11 @@ is set in .argus/config.yml, not hardcoded here.
 from __future__ import annotations
 
 import json
-import os
 
-from anthropic import Anthropic
+from litellm import completion
 
 from argus.context.gather import Context
 from argus.lenses.base import Finding, Lens
-
-_client: Anthropic | None = None
-
-
-def _get_client() -> Anthropic:
-    global _client
-    if _client is None:
-        api_key = os.environ.get("ANTHROPIC_API_KEY")
-        if not api_key:
-            raise RuntimeError(
-                "ANTHROPIC_API_KEY is not set. Argus calls the Anthropic API "
-                "directly and needs a key in the environment to run."
-            )
-        _client = Anthropic(api_key=api_key)
-    return _client
 
 
 def _extract_json(text: str):
@@ -60,15 +53,20 @@ def _context_prompt(context: Context) -> str:
     return "\n\n".join(parts)
 
 
-def run_lens(lens: Lens, context: Context, model: str, max_tokens: int = 4096) -> list[Finding]:
-    client = _get_client()
-    response = client.messages.create(
+def _complete(system_prompt: str, user_prompt: str, model: str, max_tokens: int) -> str:
+    response = completion(
         model=model,
         max_tokens=max_tokens,
-        system=lens.system_prompt(),
-        messages=[{"role": "user", "content": _context_prompt(context)}],
+        messages=[
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt},
+        ],
     )
-    text = "".join(block.text for block in response.content if block.type == "text")
+    return response.choices[0].message.content or ""
+
+
+def run_lens(lens: Lens, context: Context, model: str, max_tokens: int = 4096) -> list[Finding]:
+    text = _complete(lens.system_prompt(), _context_prompt(context), model, max_tokens)
 
     try:
         raw_findings = _extract_json(text)
@@ -121,7 +119,6 @@ def curate_with_model(
     if not findings:
         return []
 
-    client = _get_client()
     findings_payload = [
         {
             "index": i,
@@ -143,13 +140,7 @@ def curate_with_model(
         + "\n```"
     )
 
-    response = client.messages.create(
-        model=model,
-        max_tokens=max_tokens,
-        system=CURATOR_SYSTEM_PROMPT,
-        messages=[{"role": "user", "content": user_prompt}],
-    )
-    text = "".join(block.text for block in response.content if block.type == "text")
+    text = _complete(CURATOR_SYSTEM_PROMPT, user_prompt, model, max_tokens)
 
     try:
         decisions = _extract_json(text)

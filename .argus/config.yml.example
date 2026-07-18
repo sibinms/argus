@@ -5,9 +5,17 @@
 #         while you're building trust in a new repo or a new set of lenses
 mode: active
 
+# Any provider litellm supports works here — mix providers freely, e.g.
+# lens: gpt-4o-mini with curator: claude-opus-4-8. Set whichever provider's
+# API key as an env var (ANTHROPIC_API_KEY, OPENAI_API_KEY, GEMINI_API_KEY,
+# ...): https://docs.litellm.ai/docs/providers
 models:
   lens: claude-haiku-4-5      # cheap, high-volume — asked to over-report
   curator: claude-opus-4-8     # expensive, precise — can only drop a finding by citing evidence
+  # lens: gpt-4o-mini
+  # curator: gpt-4o
+  # lens: gemini/gemini-1.5-flash
+  # curator: gemini/gemini-1.5-pro
 
 # Built-in lenses: security, tests, error_handling, contracts
 # Add your own by pointing at a markdown file, see docs/writing-a-lens.md

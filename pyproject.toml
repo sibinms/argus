@@ -1,13 +1,13 @@
 [project]
 name = "argus-review"
-version = "1.1.0"
+version = "1.2.0"
 description = "An open source AI PR reviewer built from many narrow lenses and one careful curator"
 readme = "README.md"
 license = { text = "MIT" }
 requires-python = ">=3.10"
 authors = [{ name = "Sibin Sunimol" }]
 dependencies = [
-    "anthropic>=0.40.0",
+    "litellm>=1.90.0",
     "PyGithub>=2.3.0",
     "PyYAML>=6.0",
     "click>=8.1.0",

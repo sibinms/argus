@@ -8,6 +8,7 @@ looked identical from the outside. Recall against a seed set of real,
 already-known bugs is the only thing that catches that.
 
 Usage: ANTHROPIC_API_KEY=... python eval/run_eval.py
+       (or whichever provider key the models in Config point at)
 
 Add your own seeds under eval/seed_bugs/<name>/ with a diff.patch and an
 expected.yml (see the two examples already there) — ideally pulled from

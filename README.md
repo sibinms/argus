@@ -57,9 +57,19 @@ jobs:
       contents: read
       pull-requests: write
     steps:
-      - uses: sibinms/argus@v1.1.1
+      - uses: sibinms/argus@v1.2.0
         with:
           anthropic-api-key: ${{ secrets.ANTHROPIC_API_KEY }}
+```
+
+Argus works with any provider [litellm](https://docs.litellm.ai/docs/providers)
+supports — set the model strings in `.argus/config.yml` and pass that
+provider's own key via the step's `env:` instead of `anthropic-api-key`:
+
+```yaml
+      - uses: sibinms/argus@v1.2.0
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
 ```
 
 > **Heads up: `mode: active` is the default.** As soon as this workflow runs
@@ -76,7 +86,8 @@ jobs:
 ```bash
 pip install argus-review
 argus init                 # writes .argus/config.yml
-export ANTHROPIC_API_KEY=sk-...
+export ANTHROPIC_API_KEY=sk-...   # or OPENAI_API_KEY, GEMINI_API_KEY, ... — whatever
+                                   # provider the models in .argus/config.yml point at
 argus review --base origin/main --head HEAD
 ```
 
@@ -106,7 +117,9 @@ welcome, see [Contributing](#contributing).
 - **Measured, not vibes-checked.** `eval/run_eval.py` replays known bugs
   through the full pipeline and reports recall, so a prompt or context change
   is judged on whether it actually catches more, not on how it reads.
-- **Open, no vendor lock-in.** Bring your own Anthropic API key, run it as a
+- **Open, no vendor lock-in.** Bring your own API key for whichever provider
+  you prefer (Anthropic, OpenAI, Gemini, and anything else
+  [litellm](https://docs.litellm.ai/docs/providers) supports), run it as a
   GitHub Action or the CLI, and read every prompt in `src/argus/lenses/builtin/`
   — nothing about what it looks for is hidden.
 
@@ -127,6 +140,7 @@ welcome, see [Contributing](#contributing).
 | Evidence-checked curator (can't drop without a citation) | ✅ |
 | Custom lenses via markdown, no code | ✅ |
 | Recall eval harness against seed bugs | ✅ |
+| Any provider [litellm](https://docs.litellm.ai/docs/providers) supports (Anthropic, OpenAI, Gemini, ...), mixed per role | ✅ |
 | GitHub Action | ✅ |
 | CLI (local diffs) | ✅ |
 | GitLab / Bitbucket / Azure DevOps | ❌ (contributions welcome) |
@@ -172,9 +186,12 @@ asked for in a prompt.
 
 See [`.argus/config.yml.example`](.argus/config.yml.example) for every
 option: which model plays lens vs. curator, which lenses run, context size
-limits, and the confidence floor for posting. Copy it to `.argus/config.yml`
-and commit it — this file is the one piece of the tool a user should read
-before trusting it with their repo.
+limits, and the confidence floor for posting. Model strings can be anything
+[litellm](https://docs.litellm.ai/docs/providers) supports — `claude-haiku-4-5`,
+`gpt-4o-mini`, `gemini/gemini-1.5-flash`, and so on — and lens and curator
+don't need to share a provider. Copy the example to `.argus/config.yml` and
+commit it — this file is the one piece of the tool a user should read before
+trusting it with their repo.
 
 ## Writing your own lenses
 
@@ -190,7 +207,7 @@ replays a small set of known bugs (see `eval/seed_bugs/`) through the full
 pipeline and reports recall: how many of them it actually catches.
 
 ```bash
-export ANTHROPIC_API_KEY=sk-...
+export ANTHROPIC_API_KEY=sk-...   # or whichever provider key your config needs
 python eval/run_eval.py
 ```
 
@@ -203,18 +220,22 @@ intuition alone.
 ## Data privacy
 
 Argus is self-hosted in the sense that matters: it runs in *your* GitHub
-Action or *your* CLI, using *your* Anthropic API key, and it doesn't call
-home to any Argus-operated service — there isn't one.
+Action or *your* CLI, using *your* API key for whichever provider you've
+configured, and it doesn't call home to any Argus-operated service — there
+isn't one.
 
 What that means in practice:
 
 - The diff, the changed files (subject to your `context` budget in
-  `.argus/config.yml`), and the PR title/description are sent to Anthropic's
-  API to run the lenses and curator. Nothing else leaves your CI runner or
-  machine.
-- Whether that data is used for model training is governed by Anthropic's own
-  API data usage policy, not by Argus — the same as any tool built on their
-  API.
+  `.argus/config.yml`), and the PR title/description are sent to whichever
+  provider your `models.lens` and `models.curator` strings point at (via
+  [litellm](https://docs.litellm.ai/docs/providers), which routes the call —
+  it doesn't sit in front of it as its own service). Nothing else leaves your
+  CI runner or machine.
+- Whether that data is used for model training is governed by that provider's
+  own API data usage policy, not by Argus — the same as any tool built on
+  their API. Lens and curator can point at different providers, so check the
+  policy for each one you've configured.
 - Argus stores nothing itself: no database, no third-party logging, no
   telemetry. The only output is the report file and, in active mode, the
   comments it posts on your own PR via the GitHub token you provide.
@@ -244,7 +265,7 @@ pytest
 
 ## Releases
 
-Tags follow semver (`v1.1.1`, ...). Pin the Action to a specific tag rather
+Tags follow semver (`v1.2.0`, ...). Pin the Action to a specific tag rather
 than `@main` — `@main` tracks whatever's newest, including changes to lens
 prompts or curator behaviour that could shift what gets posted on your PRs.
 See [Releases](https://github.com/sibinms/argus/releases) for the changelog

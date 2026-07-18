@@ -6,8 +6,14 @@ branding:
 
 inputs:
   anthropic-api-key:
-    description: "Anthropic API key used to run the lenses and curator"
-    required: true
+    description: >
+      Optional. Sets ANTHROPIC_API_KEY for this step. Kept for backward
+      compatibility with the default Anthropic models — if your
+      .argus/config.yml uses a different provider (OpenAI, Gemini, ...),
+      skip this input and set that provider's own key via this step's
+      own `env:` block instead (e.g. OPENAI_API_KEY).
+    required: false
+    default: ""
   github-token:
     description: "Token used to read the PR and, in active mode, post comments"
     required: false
@@ -36,10 +42,17 @@ runs:
     - name: Run review
       shell: bash
       env:
-        ANTHROPIC_API_KEY: ${{ inputs.anthropic-api-key }}
         GITHUB_TOKEN: ${{ inputs.github-token }}
         ARGUS_MODE: ${{ inputs.mode }}
+        ARGUS_ANTHROPIC_API_KEY_INPUT: ${{ inputs.anthropic-api-key }}
       run: |
+        # Only export from the input if it was actually given, so this never
+        # clobbers a provider key you set directly on this step's own env:
+        # block (the way to use non-Anthropic models).
+        if [ -n "$ARGUS_ANTHROPIC_API_KEY_INPUT" ]; then
+          export ANTHROPIC_API_KEY="$ARGUS_ANTHROPIC_API_KEY_INPUT"
+        fi
+
         args=(--github)
         if [ -n "$ARGUS_MODE" ]; then
           args+=(--mode "$ARGUS_MODE")
