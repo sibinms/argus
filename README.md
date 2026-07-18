@@ -8,6 +8,10 @@
   An open source AI PR reviewer built from many narrow lenses and one careful curator.
 </p>
 
+<p align="center">
+  <img src="https://github.com/sibinms/argus/actions/workflows/ci.yml/badge.svg" alt="CI status" />
+</p>
+
 ---
 
 Most AI code reviewers are one cautious model doing two jobs at once:
@@ -50,9 +54,10 @@ export ANTHROPIC_API_KEY=sk-...
 argus review --base origin/main --head HEAD
 ```
 
-This runs against a local diff and writes `argus-report.md`. Nothing gets
-posted anywhere until `mode: active` in `.argus/config.yml`, or `--mode
-active`, and you're running against a real PR with `--github`.
+This runs against a local diff and writes `argus-report.md`. Posting only
+ever happens when there's a real PR to post to (`--github`), so a local run
+like this never touches anything — it's a safe way to read the panel's
+output before it's aimed at a real pull request.
 
 ## As a GitHub Action
 
@@ -68,15 +73,19 @@ jobs:
       contents: read
       pull-requests: write
     steps:
-      - uses: your-org/argus@main
+      - uses: sibinms/argus@v0.2.0
         with:
           anthropic-api-key: ${{ secrets.ANTHROPIC_API_KEY }}
 ```
 
-Start with `mode: shadow` in `.argus/config.yml` — it writes a job summary
-and changes nothing on the PR. Once you trust the recall (see below), switch
-to `mode: active` and it posts inline comments plus a verdict (approve,
-comment, or request changes) using the GitHub review API.
+> **Heads up: `mode: active` is the default.** As soon as this workflow runs
+> on a pull request, Argus posts real inline comments and a verdict (approve,
+> comment, or request changes) using the GitHub review API — there's no
+> separate opt-in step. If you want to see what it would say before it says
+> anything on a real PR, set `mode: shadow` in `.argus/config.yml` first: it
+> writes a job summary and changes nothing on the PR. Switch to `mode: active`
+> (or delete the line, since it's the default) once you're happy with what
+> it's finding.
 
 ## Configuration
 
@@ -110,6 +119,18 @@ have caught. Run the eval before and after any change to prompts, context
 budgets, or lenses. If a change doesn't move recall up, don't ship it on
 intuition alone.
 
+## Releases
+
+Tags follow semver (`v0.2.0`, ...). Pin the Action to a specific tag rather
+than `@main` — `@main` tracks whatever's newest, including changes to lens
+prompts or curator behaviour that could shift what gets posted on your PRs.
+See [Releases](https://github.com/sibinms/argus/releases) for the changelog
+on each version.
+
+Every push and pull request also runs the test suite automatically via
+[`.github/workflows/ci.yml`](.github/workflows/ci.yml) — the badge at the
+top of this README reflects the latest run on `main`.
+
 ## Design notes
 
 A few decisions that aren't obvious from the code:
@@ -127,6 +148,13 @@ A few decisions that aren't obvious from the code:
 - **Cheap model for volume, expensive model for judgment.** Put your
   strongest model on `curator`, not `lens` — a lens's job is to generate
   candidates, not to be right the first time.
+- **Active by default, on purpose.** A reviewer that only ever writes to a
+  report file nobody reads doesn't help anyone. Defaulting to `mode: active`
+  means the tool does its actual job — posting a real verdict — the moment
+  it's added to a repo, instead of asking every new user to find the config
+  option that turns it on. The tradeoff is real: it will comment on your very
+  first PR. Use `mode: shadow` if you'd rather watch it work before it's
+  aimed at anything.
 
 ## License
 

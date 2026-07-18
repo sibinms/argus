@@ -45,7 +45,7 @@ class PostingConfig:
 
 @dataclass
 class Config:
-    mode: str = "shadow"  # shadow | active
+    mode: str = "active"  # shadow | active
     models: ModelConfig = field(default_factory=ModelConfig)
     lenses: list[str] = field(default_factory=lambda: list(BUILTIN_LENSES))
     context: ContextConfig = field(default_factory=ContextConfig)
@@ -68,7 +68,7 @@ def load_config(path: Path | None = None) -> Config:
     posting_raw = raw.get("posting", {})
 
     return Config(
-        mode=raw.get("mode", "shadow"),
+        mode=raw.get("mode", "active"),
         models=ModelConfig(
             lens=models_raw.get("lens", ModelConfig.lens),
             curator=models_raw.get("curator", ModelConfig.curator),

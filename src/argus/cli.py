@@ -78,11 +78,11 @@ def review(config_path, github, repo, pr_number, base, head, mode_override):
 
     findings = run_review(context, config)
 
-    if config.is_active:
-        if not github:
-            raise click.ClickException("mode: active requires --github (posting needs a real PR to comment on).")
+    if config.is_active and github:
         post_to_github(repo, pr_number, token, findings, config.posting)
         click.echo(f"Posted review to {repo}#{pr_number}.")
+    elif config.is_active and not github:
+        click.echo("mode: active has no effect without --github (there's no PR to post to) — writing a local report instead.")
 
     markdown = write_shadow_report(findings, config.posting)
     click.echo(markdown)

@@ -37,5 +37,5 @@ posting:
 def test_example_config_parses(tmp_path):
     example = Path(__file__).parent.parent / ".argus" / "config.yml.example"
     config = load_config(example)
-    assert config.mode == "shadow"
+    assert config.mode == "active"
     assert "security" in config.lenses
