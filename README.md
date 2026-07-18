@@ -57,7 +57,7 @@ jobs:
       contents: read
       pull-requests: write
     steps:
-      - uses: sibinms/argus@v1.2.0
+      - uses: sibinms/argus@v1.2.1
         with:
           anthropic-api-key: ${{ secrets.ANTHROPIC_API_KEY }}
 ```
@@ -67,7 +67,7 @@ supports — set the model strings in `.argus/config.yml` and pass that
 provider's own key via the step's `env:` instead of `anthropic-api-key`:
 
 ```yaml
-      - uses: sibinms/argus@v1.2.0
+      - uses: sibinms/argus@v1.2.1
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
 ```
@@ -247,7 +247,7 @@ Every push and pull request runs through
 
 | Job | What it checks |
 |---|---|
-| `lint` | [Ruff](https://github.com/astral-sh/ruff) — style and common bugs, plus formatting |
+| `lint` | [Ruff](https://github.com/astral-sh/ruff) — style and common bugs, plus formatting — and that the README's pinned version matches `pyproject.toml` |
 | `typecheck` | [mypy](https://mypy-lang.org/) against `src/` |
 | `security` | [Bandit](https://bandit.readthedocs.io/) (static analysis) and [pip-audit](https://github.com/pypa/pip-audit) (known CVEs in dependencies) |
 | `codeql` | [GitHub CodeQL](https://codeql.github.com/), also scheduled weekly so new advisories get caught between pushes |
@@ -257,7 +257,8 @@ Run the same checks locally before pushing:
 
 ```bash
 pip install -e ".[dev]"
-ruff check src tests eval && ruff format --check src tests eval
+ruff check src tests eval scripts && ruff format --check src tests eval scripts
+python scripts/check_readme_version.py
 mypy src
 bandit -r src && pip-audit --skip-editable
 pytest
@@ -265,7 +266,7 @@ pytest
 
 ## Releases
 
-Tags follow semver (`v1.2.0`, ...). Pin the Action to a specific tag rather
+Tags follow semver (`v1.2.1`, ...). Pin the Action to a specific tag rather
 than `@main` — `@main` tracks whatever's newest, including changes to lens
 prompts or curator behaviour that could shift what gets posted on your PRs.
 See [Releases](https://github.com/sibinms/argus/releases) for the changelog
