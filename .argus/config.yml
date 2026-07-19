@@ -4,14 +4,14 @@
 # Switch to shadow to get a job-summary report without commenting.
 mode: active
 
-# Anthropic by default (matches the workflow's anthropic-api-key input).
+# OpenAI (matches the OPENAI_API_KEY passed by the workflow).
 # To use another provider, change these model strings and pass that
 # provider's key via the workflow's env: block instead.
 # Curator runs on the stronger model since judgment is where it pays off;
-# drop it to claude-haiku-4-5 too if you want to cut cost while dogfooding.
+# drop it to gpt-4o-mini too if you want to cut cost while dogfooding.
 models:
-  lens: claude-haiku-4-5
-  curator: claude-opus-4-8
+  lens: gpt-4o-mini
+  curator: gpt-4o
 
 lenses:
   - security
