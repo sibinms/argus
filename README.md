@@ -26,7 +26,7 @@ on your pull requests.
 
 -   🔍 Parallel specialized reviewers ("lenses")
 -   🧠 Evidence-based curator
--   🤖 Bring your own LLM (OpenAI, Anthropic, Gemini, LiteLLM)
+-   🤖 Bring your own LLM (OpenAI, Anthropic, Gemini, OpenRouter, any LiteLLM provider)
 -   🔒 Runs entirely in your GitHub Action or locally
 -   📝 Markdown-based custom lenses
 -   📊 Built-in recall evaluation
@@ -55,26 +55,19 @@ The goal is simple:
 
 ## Architecture
 
-``` text
-Pull Request
-      │
-      ▼
- Context Builder
-      │
-      ▼
- ┌─────────────────────────────────────────┐
- │ Security │ Tests │ Errors │ Contracts │ … │   ← lenses, in parallel
- └─────────────────────────────────────────┘
-             │
-             ▼
-      Evidence Curator                          ← drops only with a cited quote
-             │
-             ▼
- GitHub Review + Verdict
-```
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="assets/architecture-dark.svg" />
+    <img src="assets/architecture-light.svg" alt="Argus pipeline: a pull request fans out to parallel lenses on a cheap model, converges on a curator on a strong model that drops findings only with a cited quote, and posts one GitHub review verdict." width="100%" />
+  </picture>
+</p>
 
-The four lenses above ship built-in. The `…` is you: add your own as
-plain Markdown (see [Writing Custom Lenses](#writing-custom-lenses)).
+A pull request fans out to the four built-in lenses (plus any of your
+own), each reviewing in parallel on a cheap model and told to
+over-report. The curator — on your strong model — merges duplicates and
+drops a finding only when it can quote the diff proving it wrong, then
+posts one verdict as a GitHub review. The `…your own` lens is you: add
+reviewers as plain Markdown (see [Writing Custom Lenses](#writing-custom-lenses)).
 
 ------------------------------------------------------------------------
 
@@ -89,8 +82,8 @@ plain Markdown (see [Writing Custom Lenses](#writing-custom-lenses)).
   Evidence-Based Curation     Findings are removed only when evidence
                               contradicts them.
 
-  Provider Agnostic           Works with OpenAI, Anthropic, Gemini and
-                              any LiteLLM provider.
+  Provider Agnostic           Works with OpenAI, Anthropic, Gemini,
+                              OpenRouter and any LiteLLM provider.
 
   Custom Lenses               Create new reviewers using Markdown.
 
@@ -135,6 +128,18 @@ Pick your provider. Pass that provider's key, then point
   env:
     GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
 ```
+
+**OpenRouter** — one key, hundreds of models across providers.
+
+``` yaml
+- uses: sibinms/argus@v1.2.3
+  env:
+    OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+```
+
+Then set OpenRouter model strings in `.argus/config.yml`, e.g.
+`models.lens: openrouter/anthropic/claude-3.5-haiku`,
+`models.curator: openrouter/anthropic/claude-3.5-sonnet`.
 
 Any other provider [LiteLLM](https://docs.litellm.ai/docs/providers)
 supports works the same way: that provider's env var, that provider's
@@ -195,8 +200,33 @@ Configure:
 -   Context limits
 -   Confidence thresholds
 -   Review mode (shadow / active)
+-   Whether a clean PR gets a real **Approved** review (`approve_reviews`)
 
 See `.argus/config.yml.example`.
+
+### Approving pull requests
+
+By default Argus posts its verdict as a comment. To have a clean PR receive a
+real **Approved** review, set `approve_reviews: true` in `.argus/config.yml`
+**and** enable *Settings → Actions → General → "Allow GitHub Actions to approve
+pull requests"* on the repo. Without that setting the GitHub Actions token
+can't approve, so Argus falls back to a comment rather than failing the run. A
+bot approval shows as Approved but doesn't count toward a branch-protection
+"require N approvals" rule.
+
+### No comment pile-up
+
+Argus reviews every push, but it moderates itself rather than stacking
+comments:
+
+- **One rolling summary** comment, edited in place each run — never duplicated.
+- **Each finding is posted inline once** (fingerprinted so re-wording or line
+  drift doesn't create duplicates), and its thread is **resolved** once the
+  finding is addressed.
+- A **hard cap** (`max_inline_comments`, default 10) bounds inline comments for
+  the life of the PR; beyond it, findings live in the summary only.
+- A new review is submitted **only when something changed** — otherwise Argus
+  stays quiet.
 
 ------------------------------------------------------------------------
 
