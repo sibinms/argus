@@ -214,6 +214,20 @@ can't approve, so Argus falls back to a comment rather than failing the run. A
 bot approval shows as Approved but doesn't count toward a branch-protection
 "require N approvals" rule.
 
+### No comment pile-up
+
+Argus reviews every push, but it moderates itself rather than stacking
+comments:
+
+- **One rolling summary** comment, edited in place each run — never duplicated.
+- **Each finding is posted inline once** (fingerprinted so re-wording or line
+  drift doesn't create duplicates), and its thread is **resolved** once the
+  finding is addressed.
+- A **hard cap** (`max_inline_comments`, default 10) bounds inline comments for
+  the life of the PR; beyond it, findings live in the summary only.
+- A new review is submitted **only when something changed** — otherwise Argus
+  stays quiet.
+
 ------------------------------------------------------------------------
 
 ## Writing Custom Lenses

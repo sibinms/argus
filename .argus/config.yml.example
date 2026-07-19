@@ -48,3 +48,7 @@ posting:
   # rather than failing. A bot approval shows as Approved but does not count
   # toward a branch-protection "require N approvals" rule.
   approve_reviews: false
+  # Hard lifetime cap on inline comments Argus places on a PR. Past this, extra
+  # findings appear in the rolling summary comment only, so a PR can never fill
+  # up with comments no matter how often Argus runs.
+  max_inline_comments: 10

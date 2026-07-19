@@ -46,6 +46,10 @@ class PostingConfig:
     # requests" setting to be on; if it isn't, posting falls back to a comment
     # rather than failing. Off by default so no one's clean PR errors out.
     approve_reviews: bool = False
+    # Hard lifetime cap on inline comments Argus will place on a PR. Once
+    # reached, further findings appear in the rolling summary only — so the
+    # PR can never fill up with comments no matter how many times Argus runs.
+    max_inline_comments: int = 10
 
 
 @dataclass
@@ -93,5 +97,8 @@ def load_config(path: Path | None = None) -> Config:
                 "show_dropped_reasoning", PostingConfig.show_dropped_reasoning
             ),
             approve_reviews=posting_raw.get("approve_reviews", PostingConfig.approve_reviews),
+            max_inline_comments=posting_raw.get(
+                "max_inline_comments", PostingConfig.max_inline_comments
+            ),
         ),
     )

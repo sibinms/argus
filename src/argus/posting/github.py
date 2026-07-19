@@ -53,10 +53,23 @@ _SUMMARY_MARKER = "<!-- argus:summary -->"
 _FP_MARKER = re.compile(r"<!-- argus:fp:([0-9a-f]{12}) -->")
 
 
+_CONFIDENCE_RANK = {"low": 0, "medium": 1, "high": 2}
+
+
+def _normalize_summary(summary: str) -> str:
+    """Collapse a summary to a stable key: lowercase, drop punctuation and
+    digits, squeeze whitespace. Keeps the fingerprint steady across small
+    wording changes in the model's output."""
+    text = re.sub(r"[^a-z ]+", " ", summary.lower())
+    return re.sub(r"\s+", " ", text).strip()
+
+
 def _fingerprint(f: Finding) -> str:
-    """Stable identity for a finding across runs: same file, line, and summary
-    means the same finding, so it is posted at most once."""
-    key = f"{f.file}|{f.line}|{f.summary.strip().lower()}"
+    """Stable identity for a finding across runs. Deliberately excludes the
+    line number (it drifts as the PR gains commits) and normalizes the summary
+    (the model rewords it run to run), so the same underlying issue keeps the
+    same fingerprint and is posted at most once."""
+    key = f"{f.file}|{_normalize_summary(f.summary)}"
     return hashlib.sha1(key.encode("utf-8"), usedforsecurity=False).hexdigest()[:12]
 
 
@@ -239,11 +252,23 @@ def post_to_github(
     posted_fps = _posted_fingerprints(pr)
     new_fps, addressed_fps = partition_findings(current_fps, posted_fps)
 
-    # Only post inline comments for findings not already on the PR.
-    new_comments: list[ReviewComment] = [
-        {"path": f.file, "line": f.line, "side": "RIGHT", "body": _comment_body(f)}
+    # New findings not already on the PR, highest confidence first...
+    new_inline = [
+        f
         for f in inline_findings
         if f.file is not None and f.line is not None and _fingerprint(f) in new_fps
+    ]
+    new_inline.sort(key=lambda f: _CONFIDENCE_RANK.get(f.confidence, 0), reverse=True)
+
+    # ...limited by the hard lifetime cap. Once the PR already carries
+    # max_inline_comments Argus comments, no more are posted inline — the rest
+    # live in the rolling summary. This is what makes "endless comments"
+    # impossible regardless of dedup.
+    budget = max(0, posting.max_inline_comments - len(posted_fps))
+    new_comments: list[ReviewComment] = [
+        {"path": f.file, "line": f.line, "side": "RIGHT", "body": _comment_body(f)}
+        for f in new_inline[:budget]
+        if f.file is not None and f.line is not None
     ]
 
     v = verdict(findings, posting)

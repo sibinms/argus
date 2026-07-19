@@ -57,9 +57,40 @@ def test_partition_splits_new_and_addressed():
     assert addressed == {"c"}
 
 
-def test_fingerprint_is_stable_for_the_same_finding():
-    assert _fingerprint(_finding(2)) == _fingerprint(_finding(2))
-    assert _fingerprint(_finding(2)) != _fingerprint(_finding(3))
+def _f(summary: str, line: int = 1, confidence: str = "high") -> Finding:
+    return Finding(
+        lens="tests",
+        file="a.py",
+        line=line,
+        summary=summary,
+        detail="d",
+        confidence=confidence,
+        status="kept",
+    )
+
+
+def test_fingerprint_ignores_line_and_wording_drift():
+    # same issue on a different line -> same fingerprint (line drift)
+    assert _fingerprint(_f("SQL injection risk", line=2)) == _fingerprint(
+        _f("SQL injection risk", line=40)
+    )
+    # same issue, reworded/repunctuated -> same fingerprint (wording drift)
+    assert _fingerprint(_f("SQL injection risk")) == _fingerprint(_f("sql injection risk."))
+    # a genuinely different issue -> different fingerprint
+    assert _fingerprint(_f("SQL injection risk")) != _fingerprint(_f("missing timeout"))
+
+
+def test_inline_comments_are_capped(monkeypatch):
+    pr = _fake_pr([None])
+    _patch_github(monkeypatch, pr)
+
+    findings = [_f("issue one", line=1), _f("issue two", line=2)]
+    ghmod.post_to_github(
+        "o/r", 1, "tok", findings, PostingConfig(min_confidence="low", max_inline_comments=1)
+    )
+
+    posted = pr.create_review.call_args_list[0].kwargs["comments"]
+    assert len(posted) == 1  # two new findings, but the cap holds it to one
 
 
 # ---- posting behaviour ----
