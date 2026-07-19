@@ -23,8 +23,13 @@ from argus.config import PostingConfig
 from argus.lenses.base import Finding
 from argus.report import postable_findings, render_markdown, verdict
 
+# An "approve" verdict is posted as a COMMENT, not a real APPROVE: the Actions
+# GITHUB_TOKEN is not permitted to approve pull requests in most repos (and a
+# bot approval wouldn't count toward required reviews anyway), so an APPROVE
+# event 422s and fails the run on a perfectly clean PR. A positive summary
+# comment says "looks good" without hitting that restriction.
 _EVENT_MAP = {
-    "approve": "APPROVE",
+    "approve": "COMMENT",
     "comment": "COMMENT",
     "request_changes": "REQUEST_CHANGES",
 }

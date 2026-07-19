@@ -62,6 +62,18 @@ def test_finding_on_non_diff_line_is_excluded(monkeypatch):
     assert not pr.create_review.call_args_list[0].kwargs.get("comments")  # excluded
 
 
+def test_clean_pr_posts_comment_not_approve(monkeypatch):
+    # No findings -> "approve" verdict. It must post as COMMENT, because the
+    # Actions token can't submit an APPROVE review (that 422s and fails the run).
+    pr = _fake_pr([None])
+    _patch_github(monkeypatch, pr)
+
+    ghmod.post_to_github("o/r", 1, "tok", [], PostingConfig(min_confidence="low"))
+
+    assert pr.create_review.call_count == 1
+    assert pr.create_review.call_args_list[0].kwargs["event"] == "COMMENT"
+
+
 def test_non_422_error_is_not_masked(monkeypatch):
     err = GithubException(401, data={"message": "Bad credentials"}, headers=None)
     pr = _fake_pr(err)
