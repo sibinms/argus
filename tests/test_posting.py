@@ -6,7 +6,7 @@ from github.GithubException import GithubException
 from argus.config import PostingConfig
 from argus.lenses.base import Finding
 from argus.posting import github as ghmod
-from argus.posting.github import _patch_new_lines
+from argus.posting.github import _patch_new_lines, commentable_lines
 
 
 def _finding(line: int) -> Finding:
@@ -140,3 +140,16 @@ def test_empty_or_none_patch():
 def test_file_header_lines_ignored():
     patch = "--- a/x.py\n+++ b/x.py\n@@ -1,1 +1,2 @@\n a\n+b\n"
     assert _patch_new_lines(patch) == {1, 2}
+
+
+def test_commentable_lines_maps_each_file_to_its_diff_lines():
+    f1 = MagicMock()
+    f1.filename = "a.py"
+    f1.patch = "@@ -1,1 +1,2 @@\n a\n+b\n"  # new-file lines {1, 2}
+    f2 = MagicMock()
+    f2.filename = "b.py"
+    f2.patch = "@@ -5,0 +5,1 @@\n+z\n"  # new-file line {5}
+    pr = MagicMock()
+    pr.get_files.return_value = [f1, f2]
+
+    assert commentable_lines(pr) == {"a.py": {1, 2}, "b.py": {5}}

@@ -8,6 +8,14 @@ def test_load_config_missing_file_returns_defaults(tmp_path):
     assert config == Config()
 
 
+def test_approve_reviews_defaults_off_and_loads_when_set(tmp_path):
+    assert Config().posting.approve_reviews is False
+
+    path = tmp_path / "config.yml"
+    path.write_text("posting:\n  approve_reviews: true\n")
+    assert load_config(path).posting.approve_reviews is True
+
+
 def test_load_config_reads_values(tmp_path):
     path = tmp_path / "config.yml"
     path.write_text(
