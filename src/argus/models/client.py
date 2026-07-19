@@ -32,7 +32,17 @@ def _extract_json(text: str):
         text = text.split("```", 2)[1]
         if text.startswith("json"):
             text = text[4:]
-    return json.loads(text.strip())
+    text = text.strip()
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        # Models sometimes wrap the array in a sentence ("Here are the
+        # findings: [...]"). Salvage the outermost JSON array rather than
+        # dropping the whole lens's output.
+        start, end = text.find("["), text.rfind("]")
+        if start != -1 and end > start:
+            return json.loads(text[start : end + 1])
+        raise
 
 
 def _context_prompt(context: Context) -> str:
@@ -61,6 +71,7 @@ def _complete(system_prompt: str, user_prompt: str, model: str, max_tokens: int)
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_prompt},
         ],
+        timeout=120,  # never let a stalled provider hang the whole review
     )
     return response.choices[0].message.content or ""
 
