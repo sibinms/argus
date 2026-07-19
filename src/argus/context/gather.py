@@ -46,6 +46,7 @@ def gather_local(base_ref: str, head_ref: str, config: ContextConfig) -> Context
         capture_output=True,
         text=True,
         check=True,
+        timeout=60,
     ).stdout
 
     # Fixed argv list, no shell interpolation; "git" is resolved via PATH by design.
@@ -54,6 +55,7 @@ def gather_local(base_ref: str, head_ref: str, config: ContextConfig) -> Context
         capture_output=True,
         text=True,
         check=True,
+        timeout=60,
     ).stdout.splitlines()
 
     files = [ChangedFile(path=p, content=_read_file(p)) for p in changed_paths if p]

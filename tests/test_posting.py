@@ -51,6 +51,17 @@ def test_falls_back_to_body_only_on_422(monkeypatch):
     assert not pr.create_review.call_args_list[1].kwargs.get("comments")  # retry body-only
 
 
+def test_finding_on_non_diff_line_is_excluded(monkeypatch):
+    pr = _fake_pr([None])  # create_review succeeds
+    _patch_github(monkeypatch, pr)
+
+    # patch touches new-file lines {1, 2}; a finding on line 999 is off-diff
+    ghmod.post_to_github("o/r", 1, "tok", [_finding(999)], PostingConfig(min_confidence="low"))
+
+    assert pr.create_review.call_count == 1
+    assert not pr.create_review.call_args_list[0].kwargs.get("comments")  # excluded
+
+
 def test_non_422_error_is_not_masked(monkeypatch):
     err = GithubException(401, data={"message": "Bad credentials"}, headers=None)
     pr = _fake_pr(err)
