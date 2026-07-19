@@ -10,7 +10,7 @@ mode: active
 # tier allows. To use another provider, change these model strings and pass
 # that provider's key via the workflow's env: block instead.
 models:
-  lens: gemini/gemini-2.0-flash
+  lens: gemini/gemini-2.5-flash
   curator: gemini/gemini-2.5-flash
 
 lenses:
