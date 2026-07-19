@@ -14,11 +14,11 @@ jobs:
   review:
     runs-on: ubuntu-latest
     # Provider key for the models in .argus/config.yml. Set at job level so
-    # it's inherited by the composite action's steps. Using OpenAI here;
-    # for Anthropic, set ANTHROPIC_API_KEY instead (or pass it via the
-    # action's `with: anthropic-api-key`) and switch the models in the config.
+    # it's inherited by the composite action's steps. Using Gemini (free
+    # tier) here; for another provider, set that provider's key instead
+    # (OPENAI_API_KEY, ANTHROPIC_API_KEY, ...) and switch the config models.
     env:
-      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
     steps:
       # Pinned to the released tag. Switch to @main (or a local `./` action)
       # if you want a PR reviewed by in-development Argus rather than the
