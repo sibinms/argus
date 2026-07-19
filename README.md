@@ -55,26 +55,19 @@ The goal is simple:
 
 ## Architecture
 
-``` text
-Pull Request
-      │
-      ▼
- Context Builder
-      │
-      ▼
- ┌─────────────────────────────────────────┐
- │ Security │ Tests │ Errors │ Contracts │ … │   ← lenses, in parallel
- └─────────────────────────────────────────┘
-             │
-             ▼
-      Evidence Curator                          ← drops only with a cited quote
-             │
-             ▼
- GitHub Review + Verdict
-```
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="assets/architecture-dark.svg" />
+    <img src="assets/architecture-light.svg" alt="Argus pipeline: a pull request fans out to parallel lenses on a cheap model, converges on a curator on a strong model that drops findings only with a cited quote, and posts one GitHub review verdict." width="100%" />
+  </picture>
+</p>
 
-The four lenses above ship built-in. The `…` is you: add your own as
-plain Markdown (see [Writing Custom Lenses](#writing-custom-lenses)).
+A pull request fans out to the four built-in lenses (plus any of your
+own), each reviewing in parallel on a cheap model and told to
+over-report. The curator — on your strong model — merges duplicates and
+drops a finding only when it can quote the diff proving it wrong, then
+posts one verdict as a GitHub review. The `…your own` lens is you: add
+reviewers as plain Markdown (see [Writing Custom Lenses](#writing-custom-lenses)).
 
 ------------------------------------------------------------------------
 
