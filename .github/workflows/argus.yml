@@ -1,0 +1,22 @@
+name: Argus review
+
+# Dogfooding: Argus reviews pull requests on its own repo.
+# Fires on any PR (feature -> develop, develop -> main, etc.).
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  review:
+    runs-on: ubuntu-latest
+    steps:
+      # Pinned to the released tag. Switch to @main (or a local `./` action)
+      # if you want a PR reviewed by in-development Argus rather than the
+      # last release.
+      - uses: sibinms/argus@v1.2.3
+        with:
+          anthropic-api-key: ${{ secrets.ANTHROPIC_API_KEY }}
