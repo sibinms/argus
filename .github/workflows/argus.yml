@@ -13,10 +13,15 @@ permissions:
 jobs:
   review:
     runs-on: ubuntu-latest
+    # Provider key for the models in .argus/config.yml. Set at job level so
+    # it's inherited by the composite action's steps. Using Gemini (free
+    # tier) here; for another provider, set that provider's key instead
+    # (OPENAI_API_KEY, ANTHROPIC_API_KEY, ...) and switch the config models.
+    env:
+      GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
     steps:
-      # Pinned to the released tag. Switch to @main (or a local `./` action)
-      # if you want a PR reviewed by in-development Argus rather than the
-      # last release.
-      - uses: sibinms/argus@v1.2.3
-        with:
-          anthropic-api-key: ${{ secrets.ANTHROPIC_API_KEY }}
+      # This repo's PRs *are* changes to Argus, so we review each PR with the
+      # code in that PR (the local ./ action) rather than the last release.
+      # Requires a checkout first so ./action.yml is present.
+      - uses: actions/checkout@v4
+      - uses: ./

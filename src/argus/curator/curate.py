@@ -1,7 +1,16 @@
 """Orchestrates curation: dedupe near-identical findings from different
-lenses, ask the curator model to decide keep/drop/downgrade for each, then
-enforce that any "drop" the curator hands back is actually backed by real
-text from the diff — not just the model's say-so.
+lenses, ask the curator model to decide keep/drop_noise/drop/downgrade for
+each, then enforce the drop rules.
+
+Two kinds of drop, deliberately treated differently:
+
+- "drop_noise" — the finding never asserted a real problem (pure narration of
+  a change) or its impact claim is mis-scoped. This is a judgement about the
+  finding's own text, so no code quote is required.
+- "drop" — the finding asserts a real problem the curator claims is factually
+  wrong. This disputes the code, so it must cite a quote that actually appears
+  in the diff/files; if it can't, we refuse the drop and keep the finding
+  (downgraded) rather than trusting the model's say-so.
 """
 
 from __future__ import annotations
@@ -59,7 +68,12 @@ def curate(findings: list[Finding], context: Context, model: str) -> list[Findin
         reason = decision.get("reason", "")
         evidence_quote = decision.get("evidence_quote")
 
-        if action == "drop":
+        if action == "drop_noise":
+            # Not a claim about the code (narration / mis-scoped impact), so no
+            # quote is required — the finding's own wording is the grounds.
+            finding.status = "dropped"
+            finding.drop_reason = reason
+        elif action == "drop":
             if quote_appears_in_context(evidence_quote, context):
                 finding.status = "dropped"
                 finding.drop_reason = reason

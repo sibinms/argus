@@ -4,14 +4,14 @@
 # Switch to shadow to get a job-summary report without commenting.
 mode: active
 
-# Anthropic by default (matches the workflow's anthropic-api-key input).
-# To use another provider, change these model strings and pass that
-# provider's key via the workflow's env: block instead.
-# Curator runs on the stronger model since judgment is where it pays off;
-# drop it to claude-haiku-4-5 too if you want to cut cost while dogfooding.
+# Gemini free tier (matches the GEMINI_API_KEY passed by the workflow).
+# Both on flash to stay comfortably inside free-tier limits while dogfooding;
+# bump the curator to gemini/gemini-2.5-pro for stronger judgment if your
+# tier allows. To use another provider, change these model strings and pass
+# that provider's key via the workflow's env: block instead.
 models:
-  lens: claude-haiku-4-5
-  curator: claude-opus-4-8
+  lens: gemini/gemini-2.5-flash
+  curator: gemini/gemini-2.5-flash
 
 lenses:
   - security
@@ -22,3 +22,6 @@ lenses:
 posting:
   min_confidence: medium
   show_dropped_reasoning: true
+  # We enabled "Allow GitHub Actions to approve pull requests" on this repo,
+  # so Argus posts a real Approved review on a clean PR.
+  approve_reviews: true
