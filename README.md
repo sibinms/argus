@@ -26,7 +26,7 @@ on your pull requests.
 
 -   🔍 Parallel specialized reviewers ("lenses")
 -   🧠 Evidence-based curator
--   🤖 Bring your own LLM (OpenAI, Anthropic, Gemini, LiteLLM)
+-   🤖 Bring your own LLM (OpenAI, Anthropic, Gemini, OpenRouter, any LiteLLM provider)
 -   🔒 Runs entirely in your GitHub Action or locally
 -   📝 Markdown-based custom lenses
 -   📊 Built-in recall evaluation
@@ -89,8 +89,8 @@ plain Markdown (see [Writing Custom Lenses](#writing-custom-lenses)).
   Evidence-Based Curation     Findings are removed only when evidence
                               contradicts them.
 
-  Provider Agnostic           Works with OpenAI, Anthropic, Gemini and
-                              any LiteLLM provider.
+  Provider Agnostic           Works with OpenAI, Anthropic, Gemini,
+                              OpenRouter and any LiteLLM provider.
 
   Custom Lenses               Create new reviewers using Markdown.
 
@@ -135,6 +135,18 @@ Pick your provider. Pass that provider's key, then point
   env:
     GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
 ```
+
+**OpenRouter** — one key, hundreds of models across providers.
+
+``` yaml
+- uses: sibinms/argus@v1.2.3
+  env:
+    OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+```
+
+Then set OpenRouter model strings in `.argus/config.yml`, e.g.
+`models.lens: openrouter/anthropic/claude-3.5-haiku`,
+`models.curator: openrouter/anthropic/claude-3.5-sonnet`.
 
 Any other provider [LiteLLM](https://docs.litellm.ai/docs/providers)
 supports works the same way: that provider's env var, that provider's
