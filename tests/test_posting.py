@@ -195,6 +195,67 @@ def test_non_422_error_is_not_masked(monkeypatch):
     assert pr.create_review.call_count == 1  # no pointless retry on a real error
 
 
+# ---- rolling summary ----
+
+
+def test_upsert_summary_creates_when_absent():
+    pr = MagicMock()
+    pr.get_issue_comments.return_value = []
+
+    ghmod._upsert_summary(pr, "hello")
+
+    pr.create_issue_comment.assert_called_once()
+    assert "argus:summary" in pr.create_issue_comment.call_args.args[0]
+
+
+def test_upsert_summary_edits_in_place_when_present():
+    existing = MagicMock()
+    existing.body = "<!-- argus:summary -->\nold body"
+    pr = MagicMock()
+    pr.get_issue_comments.return_value = [existing]
+
+    ghmod._upsert_summary(pr, "new body")
+
+    existing.edit.assert_called_once()
+    assert "new body" in existing.edit.call_args.args[0]
+    pr.create_issue_comment.assert_not_called()  # never a second summary
+
+
+# ---- resolving addressed threads ----
+
+
+def test_resolves_only_addressed_unresolved_threads(monkeypatch):
+    threads = [
+        {"id": "T1", "isResolved": False, "firstBody": "<!-- argus:fp:aaaaaaaaaaaa -->\nx"},
+        {"id": "T2", "isResolved": False, "firstBody": "<!-- argus:fp:bbbbbbbbbbbb -->\ny"},
+        {"id": "T3", "isResolved": True, "firstBody": "<!-- argus:fp:aaaaaaaaaaaa -->\nz"},
+    ]
+    resolved: list[str] = []
+    monkeypatch.setattr(ghmod, "_graphql_review_threads", lambda *a: threads)
+    monkeypatch.setattr(ghmod, "_graphql_resolve_thread", lambda tid, tok: resolved.append(tid))
+
+    ghmod._resolve_addressed_threads("o/r", 1, "tok", {"aaaaaaaaaaaa"})
+
+    # T1: addressed + unresolved -> resolve. T2: not addressed. T3: already resolved.
+    assert resolved == ["T1"]
+
+
+def test_resolve_addressed_noop_when_nothing_addressed(monkeypatch):
+    called: list[int] = []
+    monkeypatch.setattr(ghmod, "_graphql_review_threads", lambda *a: called.append(1) or [])
+    ghmod._resolve_addressed_threads("o/r", 1, "tok", set())
+    assert called == []  # no API call when there's nothing to resolve
+
+
+def test_resolve_addressed_swallows_api_errors(monkeypatch):
+    def boom(*args):
+        raise RuntimeError("graphql down")
+
+    monkeypatch.setattr(ghmod, "_graphql_review_threads", boom)
+    # best-effort housekeeping must never break the run
+    ghmod._resolve_addressed_threads("o/r", 1, "tok", {"aaaaaaaaaaaa"})
+
+
 # ---- diff parsing ----
 
 
