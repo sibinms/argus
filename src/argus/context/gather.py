@@ -67,6 +67,7 @@ def gather_github(
 ) -> Context:
     """Pulls the diff, changed files, and PR description from the GitHub API."""
     from github import Github
+    from github.GithubException import GithubException
 
     gh = Github(token, timeout=30)
     repo = gh.get_repo(repo_full_name)
@@ -81,7 +82,10 @@ def gather_github(
             blob = repo.get_contents(pr_file.filename, ref=pr.head.sha)
             if not isinstance(blob, list):
                 content = blob.decoded_content.decode("utf-8", "ignore")
-        except Exception:
+        except GithubException:
+            # File content is optional context — the diff is always present.
+            # If the API can't return the full file (too large, moved/deleted,
+            # permissions), review without it rather than failing the run.
             content = None
         files.append(ChangedFile(path=pr_file.filename, content=content))
 
