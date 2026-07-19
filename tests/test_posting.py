@@ -1,4 +1,65 @@
+from unittest.mock import MagicMock
+
+import pytest
+from github.GithubException import GithubException
+
+from argus.config import PostingConfig
+from argus.lenses.base import Finding
+from argus.posting import github as ghmod
 from argus.posting.github import _patch_new_lines
+
+
+def _finding(line: int) -> Finding:
+    return Finding(
+        lens="tests",
+        file="a.py",
+        line=line,
+        summary="s",
+        detail="d",
+        confidence="high",
+        status="kept",
+    )
+
+
+def _fake_pr(create_review_side_effect):
+    pr = MagicMock()
+    changed = MagicMock()
+    changed.filename = "a.py"
+    changed.patch = "@@ -1,1 +1,2 @@\n a\n+b\n"  # new-file lines {1, 2}
+    pr.get_files.return_value = [changed]
+    pr.create_review.side_effect = create_review_side_effect
+    return pr
+
+
+def _patch_github(monkeypatch, pr):
+    repo = MagicMock()
+    repo.get_pull.return_value = pr
+    gh = MagicMock()
+    gh.get_repo.return_value = repo
+    monkeypatch.setattr(ghmod, "Github", lambda *a, **k: gh)
+
+
+def test_falls_back_to_body_only_on_422(monkeypatch):
+    err = GithubException(422, data={"message": "Line could not be resolved"}, headers=None)
+    pr = _fake_pr([err, None])  # first call (with comments) 422s, retry succeeds
+    _patch_github(monkeypatch, pr)
+
+    ghmod.post_to_github("o/r", 1, "tok", [_finding(2)], PostingConfig(min_confidence="low"))
+
+    assert pr.create_review.call_count == 2
+    assert pr.create_review.call_args_list[0].kwargs["comments"]  # first tried inline
+    assert not pr.create_review.call_args_list[1].kwargs.get("comments")  # retry body-only
+
+
+def test_non_422_error_is_not_masked(monkeypatch):
+    err = GithubException(401, data={"message": "Bad credentials"}, headers=None)
+    pr = _fake_pr(err)
+    _patch_github(monkeypatch, pr)
+
+    with pytest.raises(GithubException):
+        ghmod.post_to_github("o/r", 1, "tok", [_finding(2)], PostingConfig(min_confidence="low"))
+
+    assert pr.create_review.call_count == 1  # no pointless retry on a real error
 
 
 def test_added_and_context_lines_are_commentable():

@@ -68,7 +68,7 @@ def gather_github(
     """Pulls the diff, changed files, and PR description from the GitHub API."""
     from github import Github
 
-    gh = Github(token)
+    gh = Github(token, timeout=30)
     repo = gh.get_repo(repo_full_name)
     pr = repo.get_pull(pr_number)
 

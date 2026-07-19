@@ -76,7 +76,7 @@ def post_to_github(
     findings: list[Finding],
     posting: PostingConfig,
 ) -> None:
-    gh = Github(token)
+    gh = Github(token, timeout=30)
     repo = gh.get_repo(repo_full_name)
     pr = repo.get_pull(pr_number)
 
@@ -94,11 +94,13 @@ def post_to_github(
 
     try:
         pr.create_review(body=summary, event=event, comments=comments)
-    except GithubException:
-        # A comment line GitHub couldn't resolve would sink the whole review.
-        # The summary already contains every finding, so fall back to posting
-        # it without inline comments rather than failing the run.
-        if comments:
+    except GithubException as e:
+        # A comment on a line GitHub can't resolve returns 422 and sinks the
+        # whole review. The summary already contains every finding, so retry
+        # without inline comments. Any other failure (auth, rate limit, ...)
+        # is a real problem we want surfaced, so re-raise it instead of
+        # masking it behind a pointless retry.
+        if comments and getattr(e, "status", None) == 422:
             pr.create_review(body=summary, event=event)
         else:
             raise
