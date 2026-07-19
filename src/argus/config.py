@@ -41,6 +41,11 @@ class ContextConfig:
 class PostingConfig:
     min_confidence: str = "medium"  # low | medium | high
     show_dropped_reasoning: bool = True
+    # When True, a clean PR gets a real APPROVE review instead of a plain
+    # comment. Requires the repo's "Allow GitHub Actions to approve pull
+    # requests" setting to be on; if it isn't, posting falls back to a comment
+    # rather than failing. Off by default so no one's clean PR errors out.
+    approve_reviews: bool = False
 
 
 @dataclass
@@ -87,5 +92,6 @@ def load_config(path: Path | None = None) -> Config:
             show_dropped_reasoning=posting_raw.get(
                 "show_dropped_reasoning", PostingConfig.show_dropped_reasoning
             ),
+            approve_reviews=posting_raw.get("approve_reviews", PostingConfig.approve_reviews),
         ),
     )

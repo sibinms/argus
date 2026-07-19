@@ -4,7 +4,7 @@ import github
 from github.GithubException import GithubException
 
 from argus.config import ContextConfig
-from argus.context.gather import gather_github
+from argus.context.gather import gather_github, gather_local
 
 
 def test_gather_github_handles_get_contents_failure(monkeypatch):
@@ -32,3 +32,36 @@ def test_gather_github_handles_get_contents_failure(monkeypatch):
     assert len(ctx.changed_files) == 1
     assert ctx.changed_files[0].path == "a.py"
     assert ctx.changed_files[0].content is None
+
+
+def test_gather_github_sets_a_client_timeout(monkeypatch):
+    captured = {}
+
+    def fake_github(*args, **kwargs):
+        captured.update(kwargs)
+        pr = MagicMock()
+        pr.title = ""
+        pr.body = ""
+        pr.head.sha = "s"
+        pr.get_files.return_value = []
+        gh = MagicMock()
+        gh.get_repo.return_value.get_pull.return_value = pr
+        return gh
+
+    monkeypatch.setattr(github, "Github", fake_github)
+    gather_github("o/r", 1, "tok", ContextConfig())
+    assert captured.get("timeout")
+
+
+def test_gather_local_sets_subprocess_timeouts(monkeypatch):
+    calls = []
+
+    def fake_run(*args, **kwargs):
+        calls.append(kwargs)
+        result = MagicMock()
+        result.stdout = ""
+        return result
+
+    monkeypatch.setattr("subprocess.run", fake_run)
+    gather_local("base", "head", ContextConfig())
+    assert calls and all("timeout" in kwargs for kwargs in calls)

@@ -200,8 +200,19 @@ Configure:
 -   Context limits
 -   Confidence thresholds
 -   Review mode (shadow / active)
+-   Whether a clean PR gets a real **Approved** review (`approve_reviews`)
 
 See `.argus/config.yml.example`.
+
+### Approving pull requests
+
+By default Argus posts its verdict as a comment. To have a clean PR receive a
+real **Approved** review, set `approve_reviews: true` in `.argus/config.yml`
+**and** enable *Settings → Actions → General → "Allow GitHub Actions to approve
+pull requests"* on the repo. Without that setting the GitHub Actions token
+can't approve, so Argus falls back to a comment rather than failing the run. A
+bot approval shows as Approved but doesn't count toward a branch-protection
+"require N approvals" rule.
 
 ------------------------------------------------------------------------
 

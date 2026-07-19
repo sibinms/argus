@@ -5,7 +5,7 @@ import pytest
 
 from argus.context.gather import Context
 from argus.lenses.base import Finding
-from argus.models.client import _extract_json, curate_with_model
+from argus.models.client import _complete, _extract_json, curate_with_model
 
 
 def test_extracts_plain_json_array():
@@ -43,6 +43,21 @@ def test_curator_keeps_everything_when_output_is_unparseable(monkeypatch):
     decisions = curate_with_model(findings, Context(diff="+x", changed_files=[]), "m")
     assert len(decisions) == 1
     assert decisions[0]["action"] == "keep"
+
+
+def test_complete_sets_a_request_timeout(monkeypatch):
+    captured = {}
+
+    def fake_completion(**kwargs):
+        captured.update(kwargs)
+        resp = MagicMock()
+        resp.choices = [MagicMock()]
+        resp.choices[0].message.content = "[]"
+        return resp
+
+    monkeypatch.setattr("argus.models.client.completion", fake_completion)
+    _complete("sys", "user", "m", 100)
+    assert captured.get("timeout")
 
 
 def test_curator_keeps_everything_on_count_mismatch(monkeypatch):

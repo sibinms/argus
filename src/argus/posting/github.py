@@ -23,13 +23,11 @@ from argus.config import PostingConfig
 from argus.lenses.base import Finding
 from argus.report import postable_findings, render_markdown, verdict
 
-# An "approve" verdict is posted as a COMMENT, not a real APPROVE: the Actions
-# GITHUB_TOKEN is not permitted to approve pull requests in most repos (and a
-# bot approval wouldn't count toward required reviews anyway), so an APPROVE
-# event 422s and fails the run on a perfectly clean PR. A positive summary
-# comment says "looks good" without hitting that restriction.
+# "approve" is handled separately (see post_to_github): it becomes a real
+# APPROVE only when posting.approve_reviews is on, otherwise a positive
+# COMMENT — because a bot APPROVE 422s in any repo without the "Allow GitHub
+# Actions to approve pull requests" setting. These two always map directly.
 _EVENT_MAP = {
-    "approve": "COMMENT",
     "comment": "COMMENT",
     "request_changes": "REQUEST_CHANGES",
 }
@@ -95,17 +93,27 @@ def post_to_github(
     ]
 
     summary = render_markdown(findings, posting)
-    event = _EVENT_MAP[verdict(findings, posting)]
+    v = verdict(findings, posting)
+    if v == "approve":
+        event = "APPROVE" if posting.approve_reviews else "COMMENT"
+    else:
+        event = _EVENT_MAP[v]
 
     try:
         pr.create_review(body=summary, event=event, comments=comments)
     except GithubException as e:
-        # A comment on a line GitHub can't resolve returns 422 and sinks the
-        # whole review. The summary already contains every finding, so retry
-        # without inline comments. Any other failure (auth, rate limit, ...)
-        # is a real problem we want surfaced, so re-raise it instead of
-        # masking it behind a pointless retry.
-        if comments and getattr(e, "status", None) == 422:
+        status = getattr(e, "status", None)
+        message = str(e).lower()
+        if status == 422 and "not permitted to approve" in message:
+            # approve_reviews is on, but this repo hasn't enabled Actions
+            # approvals. Post the positive summary as a comment rather than
+            # failing a clean PR.
+            pr.create_review(body=summary, event="COMMENT", comments=comments)
+        elif comments and status == 422:
+            # A comment on a line GitHub can't resolve sinks the whole review.
+            # The summary already contains every finding, so retry without
+            # inline comments rather than failing.
             pr.create_review(body=summary, event=event)
         else:
+            # Any other failure (auth, rate limit, ...) is real — surface it.
             raise

@@ -22,3 +22,6 @@ lenses:
 posting:
   min_confidence: medium
   show_dropped_reasoning: true
+  # We enabled "Allow GitHub Actions to approve pull requests" on this repo,
+  # so Argus posts a real Approved review on a clean PR.
+  approve_reviews: true

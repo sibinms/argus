@@ -42,3 +42,9 @@ context:
 posting:
   min_confidence: medium   # low | medium | high
   show_dropped_reasoning: true
+  # Post a real "Approved" review on a clean PR (instead of a plain comment).
+  # Needs the repo setting Settings → Actions → General → "Allow GitHub Actions
+  # to approve pull requests". If that's off, Argus falls back to a comment
+  # rather than failing. A bot approval shows as Approved but does not count
+  # toward a branch-protection "require N approvals" rule.
+  approve_reviews: false

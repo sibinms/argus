@@ -62,16 +62,46 @@ def test_finding_on_non_diff_line_is_excluded(monkeypatch):
     assert not pr.create_review.call_args_list[0].kwargs.get("comments")  # excluded
 
 
-def test_clean_pr_posts_comment_not_approve(monkeypatch):
-    # No findings -> "approve" verdict. It must post as COMMENT, because the
-    # Actions token can't submit an APPROVE review (that 422s and fails the run).
+def test_clean_pr_comments_by_default(monkeypatch):
+    # No findings -> "approve" verdict. With approve_reviews off (default) it
+    # posts as COMMENT, so a clean PR never 422s on the APPROVE restriction.
     pr = _fake_pr([None])
     _patch_github(monkeypatch, pr)
 
     ghmod.post_to_github("o/r", 1, "tok", [], PostingConfig(min_confidence="low"))
 
-    assert pr.create_review.call_count == 1
     assert pr.create_review.call_args_list[0].kwargs["event"] == "COMMENT"
+
+
+def test_clean_pr_approves_when_enabled(monkeypatch):
+    pr = _fake_pr([None])
+    _patch_github(monkeypatch, pr)
+
+    ghmod.post_to_github(
+        "o/r", 1, "tok", [], PostingConfig(min_confidence="low", approve_reviews=True)
+    )
+
+    assert pr.create_review.call_args_list[0].kwargs["event"] == "APPROVE"
+
+
+def test_approve_falls_back_to_comment_when_repo_disallows(monkeypatch):
+    # approve_reviews on, but the repo hasn't enabled Actions approvals: the
+    # APPROVE 422s, and we retry as a COMMENT instead of failing the run.
+    err = GithubException(
+        422,
+        data={"message": "GitHub Actions is not permitted to approve pull requests."},
+        headers=None,
+    )
+    pr = _fake_pr([err, None])
+    _patch_github(monkeypatch, pr)
+
+    ghmod.post_to_github(
+        "o/r", 1, "tok", [], PostingConfig(min_confidence="low", approve_reviews=True)
+    )
+
+    assert pr.create_review.call_count == 2
+    assert pr.create_review.call_args_list[0].kwargs["event"] == "APPROVE"
+    assert pr.create_review.call_args_list[1].kwargs["event"] == "COMMENT"
 
 
 def test_non_422_error_is_not_masked(monkeypatch):
