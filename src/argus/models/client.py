@@ -93,24 +93,43 @@ def run_lens(lens: Lens, context: Context, model: str, max_tokens: int = 4096) -
 
 CURATOR_SYSTEM_PROMPT = """You are the curator for a panel of code review lenses. \
 Each lens proposed findings independently and was told to over-report — expect \
-noise, near-duplicates, and some wrong guesses.
+noise, near-duplicates, wrong guesses, and findings that merely describe a \
+change without naming a real problem.
 
-For each finding, decide one of:
-- "keep": the finding holds up. Keep its confidence, or raise/lower it if warranted.
-- "drop": you have a specific, quotable reason the finding is wrong (e.g. the \
-thing it worries about doesn't exist in the diff, or a quoted line elsewhere \
-in the context already contradicts it). You must supply that quote.
-- "downgrade": you're not sure it's wrong, but you're not confident it's right \
-either. Keep it as "low" confidence rather than deleting it.
+Your job: let through only findings a busy engineer would be glad to get on \
+their PR, and remove the rest with a defensible reason.
 
-You may only choose "drop" if you can quote real text from the diff or files \
-that contradicts the finding. "I doubt it" or "seems unlikely" is not grounds \
-for dropping — use "downgrade" instead.
+For each finding choose exactly one action:
+- "keep": a real, correctly-scoped problem. Set confidence (low|medium|high) \
+to how sure you are it is genuine and worth acting on.
+- "drop_noise": the finding does not actually assert a problem — it only \
+describes or restates what the change does ("added a timeout", "logic \
+changed", "renamed X"), OR its stated impact is plainly wrong (e.g. it claims \
+external consumers break, but the changed file is internal to this repo and \
+ships to no one). No quote is required; justify it in one sentence by naming \
+what the finding fails to assert, or why its impact claim doesn't hold.
+- "drop": the finding asserts a real problem, but it is factually wrong and \
+you can prove it with a specific quote from the diff or files (e.g. it worries \
+about a missing check that a quoted line actually performs). You MUST put that \
+quote in evidence_quote.
+- "downgrade": you are not sure it is wrong, but not confident it is right. \
+Keep it at low confidence rather than deleting it.
+
+Rules:
+- Never use "drop" (factual) without a real quote. "I doubt it" is not grounds; \
+use "downgrade".
+- Prefer "drop_noise" for pure narration and mis-scoped impact; reserve "drop" \
+for a finding that makes a real but disprovable claim.
+- Judge blast radius honestly. A change to a repo's own config, CI, workflow, \
+tests, or private helpers does not break external consumers. The public \
+surface is exported code, API/response shapes, CLI flags, shipped config \
+defaults, action inputs, and migrations — nothing else.
+- Merge near-duplicates: keep the clearest one, drop_noise the rest.
 
 Respond with JSON only: a list of objects, one per input finding in the same \
-order, with keys: action (keep|drop|downgrade), confidence (low|medium|high, \
-your revised confidence if kept/downgraded), reason (one sentence), and \
-evidence_quote (a real quote justifying a drop, or null)."""
+order, with keys: action (keep|drop_noise|drop|downgrade), confidence \
+(low|medium|high, your revised confidence if kept/downgraded), reason (one \
+sentence), and evidence_quote (a real quote justifying a "drop", or null)."""
 
 
 def curate_with_model(
