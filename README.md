@@ -108,7 +108,7 @@ Pick your provider. Pass that provider's key, then point
 **Anthropic**
 
 ``` yaml
-- uses: sibinms/argus@v1.2.3
+- uses: sibinms/argus@v1.2.4
   with:
     anthropic-api-key: ${{ secrets.ANTHROPIC_API_KEY }}
 ```
@@ -116,7 +116,7 @@ Pick your provider. Pass that provider's key, then point
 **OpenAI**
 
 ``` yaml
-- uses: sibinms/argus@v1.2.3
+- uses: sibinms/argus@v1.2.4
   env:
     OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
 ```
@@ -124,7 +124,7 @@ Pick your provider. Pass that provider's key, then point
 **Gemini**
 
 ``` yaml
-- uses: sibinms/argus@v1.2.3
+- uses: sibinms/argus@v1.2.4
   env:
     GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
 ```
@@ -132,7 +132,7 @@ Pick your provider. Pass that provider's key, then point
 **OpenRouter** — one key, hundreds of models across providers.
 
 ``` yaml
-- uses: sibinms/argus@v1.2.3
+- uses: sibinms/argus@v1.2.4
   env:
     OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
 ```
@@ -155,7 +155,7 @@ model string. Lens and curator can each use a different one.
 ### CLI
 
 ``` bash
-pip install "git+https://github.com/sibinms/argus.git@v1.2.3"
+pip install "git+https://github.com/sibinms/argus.git@v1.2.4"
 
 argus init
 
