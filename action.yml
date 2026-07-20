@@ -76,7 +76,7 @@ runs:
           export ANTHROPIC_API_KEY="$ARGUS_ANTHROPIC_API_KEY_INPUT"
         fi
 
-        args=(--github)
+        args=(--github --repo "$GITHUB_REPOSITORY")
         if [ -n "$ARGUS_PR_INPUT" ]; then
           args+=(--pr "$ARGUS_PR_INPUT")
         fi
