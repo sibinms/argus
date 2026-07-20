@@ -35,6 +35,13 @@ inputs:
       claude-opus-4-8). Overrides models.curator from .argus/config.yml.
     required: false
     default: ""
+  pr:
+    description: >
+      PR number to review. Auto-detected from the GitHub event when omitted.
+      Set this when triggering from an issue_comment event, where the PR
+      number is not present in the event payload.
+    required: false
+    default: ""
 
 runs:
   using: "composite"
@@ -60,6 +67,7 @@ runs:
         ARGUS_LENS_MODEL: ${{ inputs.lens-model }}
         ARGUS_CURATOR_MODEL: ${{ inputs.curator-model }}
         ARGUS_ANTHROPIC_API_KEY_INPUT: ${{ inputs.anthropic-api-key }}
+        ARGUS_PR_INPUT: ${{ inputs.pr }}
       run: |
         # Only export from the input if it was actually given, so this never
         # clobbers a provider key you set directly on this step's own env:
@@ -68,7 +76,10 @@ runs:
           export ANTHROPIC_API_KEY="$ARGUS_ANTHROPIC_API_KEY_INPUT"
         fi
 
-        args=(--github)
+        args=(--github --repo "$GITHUB_REPOSITORY")
+        if [ -n "$ARGUS_PR_INPUT" ]; then
+          args+=(--pr "$ARGUS_PR_INPUT")
+        fi
         if [ -n "$ARGUS_MODE" ]; then
           args+=(--mode "$ARGUS_MODE")
         fi

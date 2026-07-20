@@ -11,7 +11,7 @@ import yaml
 
 DEFAULT_CONFIG_PATH = Path(".argus/config.yml")
 
-BUILTIN_LENSES = ["security", "tests", "error_handling", "contracts"]
+BUILTIN_LENSES = ["security", "tests", "error_handling", "contracts", "correctness"]
 
 
 @dataclass
@@ -65,6 +65,13 @@ class Config:
         return self.mode == "active"
 
 
+def _require_type(value: object, expected: type, key: str) -> None:
+    if not isinstance(value, expected):
+        raise ValueError(
+            f"Config key '{key}' must be {expected.__name__}, got {type(value).__name__}"
+        )
+
+
 def load_config(path: Path | None = None) -> Config:
     path = path or DEFAULT_CONFIG_PATH
     if not path.exists():
@@ -75,6 +82,17 @@ def load_config(path: Path | None = None) -> Config:
     models_raw = raw.get("models", {})
     context_raw = raw.get("context", {})
     posting_raw = raw.get("posting", {})
+
+    if "lenses" in raw:
+        _require_type(raw["lenses"], list, "lenses")
+    if "max_files" in context_raw:
+        _require_type(context_raw["max_files"], int, "context.max_files")
+    if "max_bytes_per_file" in context_raw:
+        _require_type(context_raw["max_bytes_per_file"], int, "context.max_bytes_per_file")
+    if "ignore_globs" in context_raw and context_raw["ignore_globs"] is not None:
+        _require_type(context_raw["ignore_globs"], list, "context.ignore_globs")
+    if "max_inline_comments" in posting_raw:
+        _require_type(posting_raw["max_inline_comments"], int, "posting.max_inline_comments")
 
     return Config(
         mode=raw.get("mode", "active"),

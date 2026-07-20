@@ -1,0 +1,21 @@
+name: Update floating release tag
+
+on:
+  push:
+    tags:
+      - "v[0-9]+.[0-9]+.[0-9]+"
+
+permissions:
+  contents: write
+
+jobs:
+  update-floating-tag:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Move floating major tag
+        timeout-minutes: 2
+        run: |
+          major=$(echo "${{ github.ref_name }}" | cut -d. -f1)
+          git tag -fa "$major" -m "Update $major to ${{ github.ref_name }}"
+          git push origin "$major" --force

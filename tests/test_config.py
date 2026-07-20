@@ -1,6 +1,7 @@
+import pytest
 from pathlib import Path
 
-from argus.config import Config, load_config
+from argus.config import BUILTIN_LENSES, Config, load_config
 
 
 def test_load_config_missing_file_returns_defaults(tmp_path):
@@ -55,3 +56,23 @@ def test_example_config_parses(tmp_path):
     config = load_config(example)
     assert config.mode == "active"
     assert "security" in config.lenses
+
+
+def test_correctness_in_builtin_lenses_and_default_config():
+    assert "correctness" in BUILTIN_LENSES
+    assert "correctness" in Config().lenses
+
+
+def test_load_config_rejects_wrong_types(tmp_path):
+    cases = [
+        ("lenses: security\n", "lenses"),
+        ("context:\n  max_files: thirty\n", "context.max_files"),
+        ("context:\n  max_bytes_per_file: big\n", "context.max_bytes_per_file"),
+        ("context:\n  ignore_globs: '*.log'\n", "context.ignore_globs"),
+        ("posting:\n  max_inline_comments: ten\n", "posting.max_inline_comments"),
+    ]
+    for yaml_text, key in cases:
+        path = tmp_path / "config.yml"
+        path.write_text(yaml_text)
+        with pytest.raises(ValueError, match=key):
+            load_config(path)
