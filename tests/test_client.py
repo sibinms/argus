@@ -5,7 +5,7 @@ import pytest
 
 from argus.context.gather import Context
 from argus.lenses.base import Finding
-from argus.models.client import _complete, _extract_json, curate_with_model
+from argus.models.client import _complete, _extract_json, _context_prompt, curate_with_model, generate_pr_summary
 
 
 def test_extracts_plain_json_array():
@@ -58,6 +58,34 @@ def test_complete_sets_a_request_timeout(monkeypatch):
     monkeypatch.setattr("argus.models.client.completion", fake_completion)
     _complete("sys", "user", "m", 100)
     assert captured.get("timeout")
+
+
+def test_pr_summary_appears_in_context_prompt():
+    ctx = Context(diff="+x", changed_files=[], pr_summary="## Intent\nFixes a bug.")
+    prompt = _context_prompt(ctx)
+    assert "Review brief" in prompt
+    assert "Fixes a bug." in prompt
+
+
+def test_pr_summary_absent_when_empty():
+    ctx = Context(diff="+x", changed_files=[], pr_summary="")
+    prompt = _context_prompt(ctx)
+    assert "Review brief" not in prompt
+
+
+def test_generate_pr_summary_returns_model_output(monkeypatch):
+    monkeypatch.setattr("argus.models.client.completion", _fake_completion("## Intent\nAdds a feature."))
+    ctx = Context(diff="+x", changed_files=[], pr_title="feat: add thing")
+    result = generate_pr_summary(ctx, "model")
+    assert "Adds a feature" in result
+
+
+def test_generate_pr_summary_returns_empty_on_error(monkeypatch):
+    def boom(**kwargs):
+        raise RuntimeError("API down")
+    monkeypatch.setattr("argus.models.client.completion", boom)
+    ctx = Context(diff="+x", changed_files=[])
+    assert generate_pr_summary(ctx, "model") == ""
 
 
 def test_curator_keeps_everything_on_count_mismatch(monkeypatch):
