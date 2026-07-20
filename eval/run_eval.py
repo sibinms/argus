@@ -74,13 +74,21 @@ def run_seed(seed_dir: Path, config: Config) -> tuple[int, int, list[str]]:
     return caught, len(expected["bugs"]), misses
 
 
-def main():
-    config = Config()  # defaults: all built-in lenses, shadow mode
+def build_config() -> Config:
+    """Defaults (all built-in lenses, shadow mode), with the model strings
+    optionally overridden via env vars — e.g. in CI, where only a Gemini key
+    is available. A typo in either var name is a silent no-op, which is
+    exactly what tests/test_run_eval.py checks for."""
+    config = Config()
     if lens_model := os.environ.get("ARGUS_EVAL_LENS_MODEL"):
         config.models.lens = lens_model
     if curator_model := os.environ.get("ARGUS_EVAL_CURATOR_MODEL"):
         config.models.curator = curator_model
+    return config
 
+
+def main():
+    config = build_config()
     total_caught = 0
     total_bugs = 0
 
