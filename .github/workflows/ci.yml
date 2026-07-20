@@ -74,3 +74,24 @@ jobs:
         run: pip install -e ".[dev]"
       - name: Test
         run: pytest
+
+  eval:
+    # Informational, not a gate: LLM output is non-deterministic, so a hard
+    # recall threshold here would be flaky. This exists so a prompt/lens
+    # change is always accompanied by an actual recall number in the PR,
+    # instead of "unverified" being the answer every time (see PR #5).
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install
+        run: pip install -e ".[dev]"
+      - name: Run recall eval against seed bugs
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          ARGUS_EVAL_LENS_MODEL: gemini/gemini-2.5-flash
+          ARGUS_EVAL_CURATOR_MODEL: gemini/gemini-2.5-flash
+        run: python eval/run_eval.py

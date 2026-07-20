@@ -10,13 +10,18 @@ already-known bugs is the only thing that catches that.
 Usage: ANTHROPIC_API_KEY=... python eval/run_eval.py
        (or whichever provider key the models in Config point at)
 
+To use different models (e.g. in CI, where only a Gemini key is
+available), set ARGUS_EVAL_LENS_MODEL / ARGUS_EVAL_CURATOR_MODEL rather
+than editing this file.
+
 Add your own seeds under eval/seed_bugs/<name>/ with a diff.patch and an
-expected.yml (see the two examples already there) — ideally pulled from
-your own repo's git history, not invented.
+expected.yml (see the examples already there) — ideally pulled from your
+own repo's git history, not invented.
 """
 
 from __future__ import annotations
 
+import os
 import sys
 from pathlib import Path
 
@@ -71,6 +76,11 @@ def run_seed(seed_dir: Path, config: Config) -> tuple[int, int, list[str]]:
 
 def main():
     config = Config()  # defaults: all built-in lenses, shadow mode
+    if lens_model := os.environ.get("ARGUS_EVAL_LENS_MODEL"):
+        config.models.lens = lens_model
+    if curator_model := os.environ.get("ARGUS_EVAL_CURATOR_MODEL"):
+        config.models.curator = curator_model
+
     total_caught = 0
     total_bugs = 0
 

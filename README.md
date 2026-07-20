@@ -329,8 +329,11 @@ bandit -r src && pip-audit --skip-editable
 pytest
 ```
 
-If you change prompts, include recall improvements where possible
-(`python eval/run_eval.py`).
+If you change a lens or the curator, run `python eval/run_eval.py` and
+include the recall change in your PR description — CI also runs it on
+every PR (`eval` job) and reports the number, but informationally only,
+since LLM output is non-deterministic and a hard recall gate would be
+flaky. Don't rely on CI alone here; state what you measured.
 
 ------------------------------------------------------------------------
 
