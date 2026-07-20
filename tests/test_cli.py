@@ -46,6 +46,17 @@ def test_detect_github_pr_returns_none_on_malformed_event_file(tmp_path, monkeyp
     assert cli._detect_github_pr() is None
 
 
+def test_detect_github_pr_returns_none_on_unreadable_event_file(tmp_path, monkeypatch):
+    # A directory at the event path makes read_text() raise IsADirectoryError,
+    # an OSError subclass — exercises the OSError branch specifically.
+    event_path = tmp_path / "event.json"
+    event_path.mkdir()
+    monkeypatch.setenv("GITHUB_REPOSITORY", "o/r")
+    monkeypatch.setenv("GITHUB_EVENT_PATH", str(event_path))
+
+    assert cli._detect_github_pr() is None
+
+
 def test_lens_and_curator_model_flags_override_config(tmp_path, monkeypatch):
     """--lens-model/--curator-model should let a user pick a model without
     committing .argus/config.yml at all."""
@@ -116,6 +127,39 @@ def test_model_flags_override_an_existing_config_file(tmp_path, monkeypatch):
     assert result.exit_code == 0
     assert seen_configs[0].models.lens == "gpt-4o-mini"
     assert seen_configs[0].models.curator == "gpt-4o"
+
+
+def test_explicit_empty_string_model_flags_are_a_no_op(tmp_path, monkeypatch):
+    """An empty string (e.g. an unset Action input passed through as "") must
+    not override the config, same as omitting the flag entirely."""
+    _make_repo_with_diff(tmp_path)
+    monkeypatch.chdir(tmp_path)
+
+    seen_configs = []
+    monkeypatch.setattr(
+        cli, "run_review", lambda context, config: seen_configs.append(config) or []
+    )
+
+    runner = CliRunner()
+    result = runner.invoke(
+        cli.main,
+        [
+            "review",
+            "--base",
+            "base",
+            "--head",
+            "HEAD",
+            "--lens-model",
+            "",
+            "--curator-model",
+            "",
+        ],
+    )
+
+    assert result.exit_code == 0
+    default = Config()
+    assert seen_configs[0].models.lens == default.models.lens
+    assert seen_configs[0].models.curator == default.models.curator
 
 
 def test_model_flags_absent_leave_config_defaults(tmp_path, monkeypatch):
