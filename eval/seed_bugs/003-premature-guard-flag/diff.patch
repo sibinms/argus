@@ -1,0 +1,14 @@
+diff --git a/orders/tasks.py b/orders/tasks.py
+index e69de29..4b825dc 100644
+--- a/orders/tasks.py
++++ b/orders/tasks.py
+@@ -40,6 +40,11 @@ def mark_order_fulfilled(order_id):
+     order.status = "fulfilled"
+     order.save(update_fields=["status"])
+
++    if not order.customer.profile.config.get("loyalty_notified"):
++        notify_loyalty_partner.delay(str(order.customer.id), order.total)
++        order.customer.profile.config["loyalty_notified"] = True
++        order.customer.profile.save(update_fields=["config"])
++
+     return order
