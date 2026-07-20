@@ -12,7 +12,7 @@ import subprocess  # nosec B404 - only used to shell out to git with a fixed arg
 from dataclasses import dataclass
 
 from argus.config import ContextConfig
-from argus.context.budget import apply_budget
+from argus.context.budget import apply_budget, is_ignored
 
 
 @dataclass
@@ -41,24 +41,36 @@ def _read_file(path: str) -> str | None:
 def gather_local(base_ref: str, head_ref: str, config: ContextConfig) -> Context:
     """Diffs head_ref against base_ref in the current git checkout."""
     # Fixed argv list, no shell interpolation; "git" is resolved via PATH by design.
-    diff = subprocess.run(  # nosec
-        ["git", "diff", f"{base_ref}...{head_ref}"],
-        capture_output=True,
-        text=True,
-        check=True,
-        timeout=60,
-    ).stdout
+    changed_paths = [
+        p
+        for p in subprocess.run(  # nosec
+            ["git", "diff", "--name-only", f"{base_ref}...{head_ref}"],
+            capture_output=True,
+            text=True,
+            check=True,
+            timeout=60,
+        ).stdout.splitlines()
+        if p
+    ]
 
-    # Fixed argv list, no shell interpolation; "git" is resolved via PATH by design.
-    changed_paths = subprocess.run(  # nosec
-        ["git", "diff", "--name-only", f"{base_ref}...{head_ref}"],
-        capture_output=True,
-        text=True,
-        check=True,
-        timeout=60,
-    ).stdout.splitlines()
+    # ignore_globs (lockfiles, migrations, ...) are excluded from the diff
+    # itself, not just the optional full-file dump below — otherwise a lens
+    # still reads the ignored file's hunk as part of "# Diff", just without
+    # the extra full-file context.
+    included_paths = [p for p in changed_paths if not is_ignored(p, config.ignore_globs)]
+    if included_paths:
+        # Same rationale as above: fixed argv, no shell, "git" via PATH.
+        diff = subprocess.run(  # nosec
+            ["git", "diff", f"{base_ref}...{head_ref}", "--", *included_paths],
+            capture_output=True,
+            text=True,
+            check=True,
+            timeout=60,
+        ).stdout
+    else:
+        diff = ""
 
-    files = [ChangedFile(path=p, content=_read_file(p)) for p in changed_paths if p]
+    files = [ChangedFile(path=p, content=_read_file(p)) for p in changed_paths]
     files = apply_budget(files, config)
 
     return Context(diff=diff, changed_files=files)
@@ -78,7 +90,8 @@ def gather_github(
     diff_parts = []
     files = []
     for pr_file in pr.get_files():
-        diff_parts.append(pr_file.patch or "")
+        if not is_ignored(pr_file.filename, config.ignore_globs):
+            diff_parts.append(pr_file.patch or "")
         content = None
         try:
             blob = repo.get_contents(pr_file.filename, ref=pr.head.sha)
