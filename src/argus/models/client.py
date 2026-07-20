@@ -75,6 +75,34 @@ your job is to point their attention at what matters most.\
 """
 
 
+def _planner_diff(context: Context, chars_per_file: int = 600) -> str:
+    """Builds a compact diff for the planner: up to `chars_per_file` chars
+    from each changed file's patch. Ensures the planner sees something from
+    every file rather than only the first few files of a large PR."""
+    if not context.changed_files:
+        return context.diff[:8000]
+
+    per_file_patches: dict[str, str] = {}
+    current_file = None
+    for line in context.diff.splitlines():
+        if line.startswith("--- a/") or line.startswith("+++ b/"):
+            fname = line[6:] if line.startswith("+++ b/") else None
+            if fname:
+                current_file = fname
+                per_file_patches.setdefault(current_file, "")
+        elif current_file:
+            per_file_patches[current_file] += line + "\n"
+
+    snippets = []
+    for path, patch in per_file_patches.items():
+        snippet = patch[:chars_per_file]
+        if len(patch) > chars_per_file:
+            snippet += f"\n... ({len(patch) - chars_per_file} more chars)"
+        snippets.append(f"### {path}\n{snippet}")
+
+    return "\n\n".join(snippets)
+
+
 def generate_pr_summary(context: Context, model: str) -> str:
     """Runs the planner once before lenses fire. Returns a brief that is
     injected into every lens's context so each reviewer knows what the PR
@@ -84,7 +112,7 @@ def generate_pr_summary(context: Context, model: str) -> str:
         parts.append(f"# PR title\n{context.pr_title}")
     if context.pr_body:
         parts.append(f"# PR description\n{context.pr_body}")
-    parts.append(f"# Diff\n```diff\n{context.diff[:8000]}\n```")
+    parts.append(f"# Diff (excerpt per file)\n```diff\n{_planner_diff(context)}\n```")
     user_prompt = "\n\n".join(parts)
     try:
         return _complete(PLANNER_SYSTEM_PROMPT, user_prompt, model, max_tokens=512)
