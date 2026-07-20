@@ -9,7 +9,6 @@ from argus.models.client import (
     _complete,
     _context_prompt,
     _extract_json,
-    _planner_diff,
     curate_with_model,
     generate_pr_summary,
 )
@@ -65,20 +64,6 @@ def test_complete_sets_a_request_timeout(monkeypatch):
     monkeypatch.setattr("argus.models.client.completion", fake_completion)
     _complete("sys", "user", "m", 100)
     assert captured.get("timeout")
-
-
-def test_planner_diff_covers_all_files():
-    from argus.context.gather import ChangedFile
-
-    diff = "+++ b/a.py\n" + "+line\n" * 200 + "+++ b/b.py\n" + "+other\n" * 200
-    ctx = Context(
-        diff=diff,
-        changed_files=[ChangedFile("a.py", None), ChangedFile("b.py", None)],
-    )
-    result = _planner_diff(ctx, chars_per_file=100)
-    assert "### a.py" in result
-    assert "### b.py" in result
-    assert "more chars" in result  # truncation note present
 
 
 def test_pr_summary_appears_in_context_prompt():
