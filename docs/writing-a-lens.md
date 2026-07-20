@@ -49,6 +49,14 @@ lenses:
   *missing* (a test, a rollback path, a log line), say explicitly that the
   lens can flag it even with no changed line to point at, and that `quote`
   can be left null in that case.
+- **Don't let it claim things it can't see.** A lens only sees the diff and
+  the files handed to it — not the rest of the project. Validated against a
+  real PR, a lens once wrote "no alerting exists for this" when the project
+  actually had Sentry configured elsewhere, in a settings file nowhere near
+  the diff. The finding's core defect was real; that phrasing wasn't. Tell
+  your lens to state only what's checkable from what it was actually shown
+  (e.g. "this path returns normally on failure, so nothing here triggers a
+  monitored exception") rather than making a claim about the whole system.
 
 ## Testing a new lens
 

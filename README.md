@@ -110,7 +110,7 @@ the workflow, as shown below.
 **Anthropic**
 
 ``` yaml
-- uses: sibinms/argus@v1.2.5
+- uses: sibinms/argus@v1.2.6
   with:
     anthropic-api-key: ${{ secrets.ANTHROPIC_API_KEY }}
 ```
@@ -118,7 +118,7 @@ the workflow, as shown below.
 **OpenAI**
 
 ``` yaml
-- uses: sibinms/argus@v1.2.5
+- uses: sibinms/argus@v1.2.6
   env:
     OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
   with:
@@ -129,7 +129,7 @@ the workflow, as shown below.
 **Gemini**
 
 ``` yaml
-- uses: sibinms/argus@v1.2.5
+- uses: sibinms/argus@v1.2.6
   env:
     GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
   with:
@@ -140,7 +140,7 @@ the workflow, as shown below.
 **OpenRouter** — one key, hundreds of models across providers.
 
 ``` yaml
-- uses: sibinms/argus@v1.2.5
+- uses: sibinms/argus@v1.2.6
   env:
     OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
   with:
@@ -164,7 +164,7 @@ both are present, so a workflow-level pick always wins for a quick test.
 ### CLI
 
 ``` bash
-pip install "git+https://github.com/sibinms/argus.git@v1.2.5"
+pip install "git+https://github.com/sibinms/argus.git@v1.2.6"
 
 argus init
 
@@ -329,8 +329,11 @@ bandit -r src && pip-audit --skip-editable
 pytest
 ```
 
-If you change prompts, include recall improvements where possible
-(`python eval/run_eval.py`).
+If you change a lens or the curator, run `python eval/run_eval.py` and
+include the recall change in your PR description — CI also runs it on
+every PR (`eval` job) and reports the number, but informationally only,
+since LLM output is non-deterministic and a hard recall gate would be
+flaky. Don't rely on CI alone here; state what you measured.
 
 ------------------------------------------------------------------------
 

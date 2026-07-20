@@ -1,0 +1,9 @@
+title: "Notify loyalty partner once per customer on order fulfillment"
+description: "Fires a webhook to the loyalty partner the first time a customer's order is fulfilled, guarded by a config flag so it only fires once."
+bugs:
+  - id: premature-guard-flag
+    file: orders/tasks.py
+    hint: "loyalty_notified is set right after enqueueing the Celery task, before confirming the partner accepted the event, so a failed or silently-rejected delivery can never be retried because the guard already looks satisfied"
+  - id: missing-test
+    file: orders/tasks.py
+    hint: "no test covers what happens when notify_loyalty_partner fails or the partner rejects the event after the flag has already been set"
