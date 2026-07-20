@@ -1,0 +1,206 @@
+--- a/payments/management/commands/backfill_payout_sequence_numbers.py
++++ b/payments/management/commands/backfill_payout_sequence_numbers.py
+@@ -0,0 +1,102 @@
++"""
++Management command: backfill_payout_sequence_numbers
++
++Assigns sequential, per-merchant payout IDs (reference_id) to all
++existing Payout records that don't yet have one.
++
++Payouts for each business are numbered chronologically:
++  - primary sort: completed_at ASC  (None values sorted last)
++  - secondary sort: id ASC          (tie-break within the same completed_at)
++
++After numbering, the django-sequences counter for each business is set to the
++maximum assigned value so that new payouts created via Payout.save() continue
++the sequence without gaps or collisions.
++
++Usage:
++    python manage.py backfill_payout_sequence_numbers
++    python manage.py backfill_payout_sequence_numbers --dry-run
++"""
++
++from django.core.management.base import BaseCommand
++from django.db import transaction
++from sequences.models import Sequence as SequenceRecord
++
++from payments.models import Payout
++
++
++class Command(BaseCommand):
++    help = "Backfill reference_id on Payout records"
++
++    def add_arguments(self, parser):
++        parser.add_argument(
++            "--dry-run",
++            action="store_true",
++            help="Print what would be done without writing to the DB",
++        )
++
++    def handle(self, *args, **options):
++        dry_run = options["dry_run"]
++
++        # All distinct businesses that have at least one unnumbered payout.
++        business_ids = list(
++            Payout.objects.filter(reference_id__isnull=True)
++            .values_list("business_id", flat=True)
++            .distinct()
++            .order_by("business_id")
++        )
++
++        if not business_ids:
++            self.stdout.write("No payouts need backfilling.")
++            return
++
++        total_updated = 0
++
++        for business_id in business_ids:
++            payouts = list(
++                Payout.objects.filter(
++                    business_id=business_id,
++                    reference_id__isnull=True,
++                )
++                # NULLs last so incomplete payouts go after completed ones.
++                .extra(
++                    select={"completed_at_is_null": "completed_at IS NULL"},
++                    order_by=["completed_at_is_null", "completed_at", "id"],
++                )
++            )
++
++            if not payouts:
++                continue
++
++            for idx, payout in enumerate(payouts, start=1):
++                payout.reference_id = idx
++
++            if dry_run:
++                self.stdout.write(
++                    f"[DRY RUN] Business {business_id}: "
++                    f"would assign 1–{len(payouts)} to {len(payouts)} payout(s)"
++                )
++                continue
++
++            max_seq = len(payouts)
++
++            with transaction.atomic():
++                Payout.objects.bulk_update(payouts, ["reference_id"])
++                # Advance the django-sequences counter so Payout.save() continues
++                # from max_seq + 1 for future payouts.
++                SequenceRecord.objects.update_or_create(
++                    name=f"payout-{business_id}",
++                    defaults={"last": max_seq},
++                )
++
++            total_updated += max_seq
++            self.stdout.write(
++                f"Business {business_id}: assigned 1–{max_seq} ({max_seq} payout(s))"
++            )
++
++        if not dry_run:
++            self.stdout.write(
++                self.style.SUCCESS(
++                    f"Done. {total_updated} payout(s) backfilled across "
++                    f"{len(business_ids)} business(es)."
++                )
++            )
+--- a/payments/models.py
++++ b/payments/models.py
+@@ -1718,6 +1718,11 @@ class Payout(BaseUUIDModel, TimeStampedModel):
+         ("twodays", _("Twodays")),
+         ("sameday", _("Sameday")),
+     )
++    SLOT = Choices(
++        ("morning", _("Morning")),
++        ("evening", _("Evening")),
++        ("adhoc", _("Ad-hoc")),
++    )
+     status = models.CharField(
+         _("status"), max_length=20, choices=STATUS, default="scheduled"
+     )
+@@ -1804,6 +1809,9 @@ class Payout(BaseUUIDModel, TimeStampedModel):
+     payout_currency_fx = models.DecimalField(
+         _("Payout currency FX"), max_digits=20, decimal_places=10, default=1
+     )
++    reference_id = models.PositiveIntegerField(_("Reference ID"), null=True)
++    slot = models.CharField(_("Slot"), max_length=20, choices=SLOT, blank=True)
++    vat = models.DecimalField(_("VAT"), max_digits=15, decimal_places=3, default=0)
+     tier = models.CharField(_("tier"), max_length=10, blank=True)
+     business_priority = models.CharField(
+         _("Business Priority"), max_length=10, blank=True
+@@ -1905,6 +1913,10 @@ def save(self, *args, **kwargs) -> None:
+         t_data = process_timeline_data(
+             "payout.update" if self.pk else "payout.create", self
+         )
++        if not self.pk and self.business_id and not self.reference_id:
++            self.reference_id = get_next_value(
++                sequence_name=f"payout-{self.business_id}"
++            )
+         super().save(*args, **kwargs)
+         if t_data and self.id:
+             create_timeline(
+--- a/payments/tasks.py
++++ b/payments/tasks.py
+@@ -1694,6 +1694,20 @@ def _allocate_transactions_to_payout(
+         )
+ 
+ 
++def _payout_slot(payout_cycle):
++    """Map the generation cycle to a payout slot.
++
++    Membership pays twice a day: the morning (9am GST) cron fires with cycle
++    "first", the evening (4pm GST) cron with "second". Every other payout
++    (standard next-day, closing, admin-forced) is ad-hoc.
++    """
++    if payout_cycle == "first":
++        return Payout.SLOT.morning
++    if payout_cycle == "second":
++        return Payout.SLOT.evening
++    return Payout.SLOT.adhoc
++
++
+ def _update_payout_aggregates(payout):
+     """Aggregate PayoutAllocation amounts by BT type and update Payout fields."""
+     allocs = PayoutAllocation.objects.filter(payout=payout).select_related(
+@@ -1750,6 +1764,18 @@ def _update_payout_aggregates(payout):
+             "payout_fee",
+         )
+     )
++    # Total VAT in the payout: the tax portions across every fee type, the
++    # same set the VAT invoice reports on (see generate_tax_invoice).
++    payout.vat = sum(
++        totals.get(t, 0)
++        for t in (
++            "charge_fee_tax",
++            "dispute_fee_tax",
++            "membership_fee_tax",
++            "network_cost_tax",
++            "active_team_memebers_tax",
++        )
++    )
+     payout.total_credit = total_credit
+     payout.total_debit = total_debit
+     payout.save(
+@@ -1764,6 +1790,7 @@ def _update_payout_aggregates(payout):
+             "dispute_fee",
+             "adjustment_credit",
+             "adjustment_debit",
++            "vat",
+             "total_credit",
+             "total_debit",
+         ]
+@@ -2102,6 +2129,7 @@ def _generate_payout(
+         settlement_fee = settlement_amount * Decimal(0.012)
+         payout_fee = payout_amount * Decimal(0.012)
+         fee = payout_total * Decimal(0.012)
++    slot = _payout_slot(payout_cycle)
+     payout = Payout.objects.create(
+         business=business,
+         currency=currency,
+@@ -2115,6 +2143,7 @@ def _generate_payout(
+         cardholder=payout_holder,
+         card=payout_card,
+         schedule=payout_schedule,
++        slot=slot,
+         total=payout_total,
+         settlement_amount=settlement_amount,
+         settlement_fee=settlement_fee,

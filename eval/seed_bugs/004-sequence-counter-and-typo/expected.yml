@@ -1,0 +1,21 @@
+title: "Add payout reference IDs, slot, and VAT fields"
+description: |
+  Adds three new fields to Payout: reference_id (a per-merchant sequential
+  integer backed by django-sequences), slot (morning/evening/adhoc), and vat
+  (sum of all tax fee components). Includes a backfill management command that
+  assigns reference_ids to existing payouts and seeds the django-sequences
+  counter so future Payout.save() calls continue the sequence without gaps.
+bugs:
+  - id: sequence-counter-seeded-from-wrong-quantity
+    file: payments/management/commands/backfill_payout_sequence_numbers.py
+    hint: >
+      sequence counter set to len(unnumbered payouts) instead of
+      max(all existing reference_ids); if any payouts already have a
+      reference_id the counter will be too low, causing future payouts to
+      collide with existing IDs
+  - id: misspelled-vat-key-active-team-members
+    file: payments/tasks.py
+    hint: >
+      active_team_memebers_tax is a typo; the correct key is
+      active_team_members_tax; totals.get silently returns 0 so that
+      tax component is always excluded from the VAT total
