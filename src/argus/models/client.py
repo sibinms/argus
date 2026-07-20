@@ -45,12 +45,61 @@ def _extract_json(text: str):
         raise
 
 
+PLANNER_SYSTEM_PROMPT = """\
+You are writing a one-page technical brief for a panel of five independent code \
+reviewers. Each reviewer specialises in a single narrow angle (security, tests, \
+error handling, contracts, correctness) and shares no notes with the others, so \
+this brief is the only shared context they have.
+
+Read the pull request below and produce a brief with exactly these three sections:
+
+## Intent
+One sentence: what is this PR trying to accomplish?
+
+## Key invariants
+Bullet list (3–5 items): what must stay true after this change? Name specific \
+fields, functions, data flows, or external contracts. Be concrete — \
+"sequence counter must equal the maximum assigned ID, not the count of unnumbered \
+rows" rather than "IDs must be correct". Include business-logic invariants, not \
+just code-level ones.
+
+## What to verify
+Bullet list (3–5 items): specific, named behaviours a reviewer should check, \
+framed as yes/no questions answerable from the diff and files. Example: \
+"Does the backfill seed the counter from max(existing reference_id)+1, or only \
+from the count of newly numbered rows?" Prefer questions that catch the most \
+common mistake for this type of change.
+
+Keep the whole brief under 200 words. The reviewers will do their own reading; \
+your job is to point their attention at what matters most.\
+"""
+
+
+def generate_pr_summary(context: Context, model: str) -> str:
+    """Runs the planner once before lenses fire. Returns a brief that is
+    injected into every lens's context so each reviewer knows what the PR
+    is trying to do and what invariants to verify."""
+    parts = []
+    if context.pr_title:
+        parts.append(f"# PR title\n{context.pr_title}")
+    if context.pr_body:
+        parts.append(f"# PR description\n{context.pr_body}")
+    parts.append(f"# Diff\n```diff\n{context.diff[:8000]}\n```")
+    user_prompt = "\n\n".join(parts)
+    try:
+        return _complete(PLANNER_SYSTEM_PROMPT, user_prompt, model, max_tokens=512)
+    except Exception:
+        return ""
+
+
 def _context_prompt(context: Context) -> str:
     parts = []
     if context.pr_title:
         parts.append(f"# PR title\n{context.pr_title}")
     if context.pr_body:
         parts.append(f"# PR description\n{context.pr_body}")
+    if context.pr_summary:
+        parts.append(f"# Review brief\n{context.pr_summary}")
 
     parts.append(f"# Diff\n```diff\n{context.diff}\n```")
 

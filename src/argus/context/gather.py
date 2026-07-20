@@ -28,6 +28,7 @@ class Context:
     changed_files: list[ChangedFile]
     pr_title: str = ""
     pr_body: str = ""
+    pr_summary: str = ""  # planner output; injected into every lens's context
 
 
 def _read_file(path: str) -> str | None:

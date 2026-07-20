@@ -38,6 +38,16 @@ intends. Focus on:
   comparison against the wrong variable (copy-paste with a name substituted
   on one side but not the other).
 
+- **Misspelled string key causing a silent wrong result.** A string literal
+  used as a dictionary key or object attribute name that contains a typo.
+  When the lookup uses `.get(key, default)` or `getattr(obj, name, default)`,
+  the typo makes it silently return the default (usually 0 or None) on every
+  call — no exception is raised, the bug is invisible at runtime until the
+  wrong value propagates to a report, payment, or stored record. Look carefully
+  at string keys in `dict.get()`, `totals.get()`, `data.get()`, and similar
+  patterns; compare them against the keys written elsewhere in the same file
+  or in related files that populate the dict.
+
 Do not flag style, missing tests, security, or performance here — even if you
 notice them. One specific, checkable logic bug is worth more than three vague
 concerns.
