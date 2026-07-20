@@ -65,11 +65,27 @@ def init():
 @click.option("--base", default="origin/main", help="Base ref for a local diff.")
 @click.option("--head", default="HEAD", help="Head ref for a local diff.")
 @click.option("--mode", "mode_override", type=click.Choice(["shadow", "active"]), default=None)
-def review(config_path, github, repo, pr_number, base, head, mode_override):
+@click.option(
+    "--lens-model",
+    default=None,
+    help="Overrides models.lens from .argus/config.yml — any model litellm supports.",
+)
+@click.option(
+    "--curator-model",
+    default=None,
+    help="Overrides models.curator from .argus/config.yml — any model litellm supports.",
+)
+def review(
+    config_path, github, repo, pr_number, base, head, mode_override, lens_model, curator_model
+):
     """Runs the panel against a local diff or a GitHub PR."""
     config = load_config(config_path)
     if mode_override:
         config.mode = mode_override
+    if lens_model:
+        config.models.lens = lens_model
+    if curator_model:
+        config.models.curator = curator_model
 
     if github:
         if repo is None or pr_number is None:

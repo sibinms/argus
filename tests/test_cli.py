@@ -3,6 +3,7 @@ import subprocess
 from click.testing import CliRunner
 
 from argus import cli
+from argus.config import Config
 
 
 def _make_repo_with_diff(path):
@@ -34,3 +35,56 @@ def test_active_mode_without_github_does_not_error(tmp_path, monkeypatch):
     assert result.exit_code == 0
     assert "writing a local report instead" in result.output
     assert (tmp_path / "argus-report.md").exists()
+
+
+def test_lens_and_curator_model_flags_override_config(tmp_path, monkeypatch):
+    """--lens-model/--curator-model should let a user pick a model without
+    committing .argus/config.yml at all."""
+    _make_repo_with_diff(tmp_path)
+    monkeypatch.chdir(tmp_path)
+
+    seen_configs = []
+
+    def fake_run_review(context, config):
+        seen_configs.append(config)
+        return []
+
+    monkeypatch.setattr(cli, "run_review", fake_run_review)
+
+    runner = CliRunner()
+    result = runner.invoke(
+        cli.main,
+        [
+            "review",
+            "--base",
+            "base",
+            "--head",
+            "HEAD",
+            "--lens-model",
+            "gpt-4o-mini",
+            "--curator-model",
+            "gemini/gemini-2.5-pro",
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert seen_configs[0].models.lens == "gpt-4o-mini"
+    assert seen_configs[0].models.curator == "gemini/gemini-2.5-pro"
+
+
+def test_model_flags_absent_leave_config_defaults(tmp_path, monkeypatch):
+    _make_repo_with_diff(tmp_path)
+    monkeypatch.chdir(tmp_path)
+
+    seen_configs = []
+    monkeypatch.setattr(
+        cli, "run_review", lambda context, config: seen_configs.append(config) or []
+    )
+
+    runner = CliRunner()
+    result = runner.invoke(cli.main, ["review", "--base", "base", "--head", "HEAD"])
+
+    assert result.exit_code == 0
+    default = Config()
+    assert seen_configs[0].models.lens == default.models.lens
+    assert seen_configs[0].models.curator == default.models.curator

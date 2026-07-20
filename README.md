@@ -102,8 +102,10 @@ reviewers as plain Markdown (see [Writing Custom Lenses](#writing-custom-lenses)
 
 ### GitHub Action
 
-Pick your provider. Pass that provider's key, then point
-`.argus/config.yml` at a matching model.
+Pick your provider and pass that provider's key. The model itself can be
+set either way: commit `.argus/config.yml` (see [Configuration](#configuration)),
+or skip the file entirely and pass `lens-model`/`curator-model` right in
+the workflow, as shown below.
 
 **Anthropic**
 
@@ -119,6 +121,9 @@ Pick your provider. Pass that provider's key, then point
 - uses: sibinms/argus@v1.2.4
   env:
     OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+  with:
+    lens-model: gpt-4o-mini
+    curator-model: gpt-4o
 ```
 
 **Gemini**
@@ -127,6 +132,9 @@ Pick your provider. Pass that provider's key, then point
 - uses: sibinms/argus@v1.2.4
   env:
     GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+  with:
+    lens-model: gemini/gemini-2.5-flash
+    curator-model: gemini/gemini-2.5-pro
 ```
 
 **OpenRouter** — one key, hundreds of models across providers.
@@ -135,15 +143,16 @@ Pick your provider. Pass that provider's key, then point
 - uses: sibinms/argus@v1.2.4
   env:
     OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+  with:
+    lens-model: openrouter/anthropic/claude-3.5-haiku
+    curator-model: openrouter/anthropic/claude-3.5-sonnet
 ```
-
-Then set OpenRouter model strings in `.argus/config.yml`, e.g.
-`models.lens: openrouter/anthropic/claude-3.5-haiku`,
-`models.curator: openrouter/anthropic/claude-3.5-sonnet`.
 
 Any other provider [LiteLLM](https://docs.litellm.ai/docs/providers)
 supports works the same way: that provider's env var, that provider's
-model string. Lens and curator can each use a different one.
+model string. Lens and curator can each use a different one — the
+`lens-model`/`curator-model` inputs override `.argus/config.yml` when
+both are present, so a workflow-level pick always wins for a quick test.
 
 > **`mode: active` is the default.** Argus posts real inline comments
 > and a verdict on the first PR it runs on. Set `mode: shadow` in
@@ -167,6 +176,13 @@ argus review --base origin/main --head HEAD
 Not on PyPI yet, so install from the tagged commit. If it fails with a
 Rust/`maturin` build error, add `--only-binary=:all:` to the `pip`
 command (a LiteLLM dependency is trying to build from source).
+
+Pick a model on the command line without touching `.argus/config.yml`:
+
+``` bash
+argus review --base origin/main --head HEAD \
+  --lens-model gpt-4o-mini --curator-model gpt-4o
+```
 
 ------------------------------------------------------------------------
 
@@ -203,6 +219,12 @@ Configure:
 -   Whether a clean PR gets a real **Approved** review (`approve_reviews`)
 
 See `.argus/config.yml.example`.
+
+`models.lens`/`models.curator` can also be set without a config file at
+all — the Action's `lens-model`/`curator-model` inputs and the CLI's
+`--lens-model`/`--curator-model` flags override whatever `.argus/config.yml`
+says (or the defaults, if there's no file). Useful for a quick test of a
+different model; commit the config file once you've settled on one.
 
 ### Approving pull requests
 

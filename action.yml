@@ -22,6 +22,19 @@ inputs:
     description: "shadow or active; overrides .argus/config.yml when set"
     required: false
     default: ""
+  lens-model:
+    description: >
+      Model for the lenses — any string litellm supports (e.g. gpt-4o-mini,
+      gemini/gemini-2.5-flash). Overrides models.lens from .argus/config.yml.
+      Lets you pick a model without committing a config file.
+    required: false
+    default: ""
+  curator-model:
+    description: >
+      Model for the curator — any string litellm supports (e.g. gpt-4o,
+      claude-opus-4-8). Overrides models.curator from .argus/config.yml.
+    required: false
+    default: ""
 
 runs:
   using: "composite"
@@ -44,6 +57,8 @@ runs:
       env:
         GITHUB_TOKEN: ${{ inputs.github-token }}
         ARGUS_MODE: ${{ inputs.mode }}
+        ARGUS_LENS_MODEL: ${{ inputs.lens-model }}
+        ARGUS_CURATOR_MODEL: ${{ inputs.curator-model }}
         ARGUS_ANTHROPIC_API_KEY_INPUT: ${{ inputs.anthropic-api-key }}
       run: |
         # Only export from the input if it was actually given, so this never
@@ -56,5 +71,11 @@ runs:
         args=(--github)
         if [ -n "$ARGUS_MODE" ]; then
           args+=(--mode "$ARGUS_MODE")
+        fi
+        if [ -n "$ARGUS_LENS_MODEL" ]; then
+          args+=(--lens-model "$ARGUS_LENS_MODEL")
+        fi
+        if [ -n "$ARGUS_CURATOR_MODEL" ]; then
+          args+=(--curator-model "$ARGUS_CURATOR_MODEL")
         fi
         argus review "${args[@]}"
