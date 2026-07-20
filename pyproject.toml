@@ -1,6 +1,6 @@
 [project]
 name = "argus-pr-review"
-version = "1.2.10"
+version = "1.2.11"
 description = "An open source AI PR reviewer built from many narrow lenses and one careful curator"
 readme = "README.md"
 license = { text = "MIT" }

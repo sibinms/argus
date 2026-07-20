@@ -14,6 +14,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Move floating major tag
+        timeout-minutes: 2
         run: |
           major=$(echo "${{ github.ref_name }}" | cut -d. -f1)
           git tag -fa "$major" -m "Update $major to ${{ github.ref_name }}"
