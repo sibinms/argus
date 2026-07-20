@@ -22,7 +22,14 @@ def _detect_github_pr() -> tuple[str, int] | None:
     if not repo or not event_path or not Path(event_path).exists():
         return None
 
-    event = json.loads(Path(event_path).read_text())
+    try:
+        event = json.loads(Path(event_path).read_text())
+    except (OSError, json.JSONDecodeError):
+        # Treat an unreadable/malformed event file the same as "couldn't
+        # detect" — the caller already raises a clear ClickException asking
+        # for --repo/--pr, which is friendlier than a raw stack trace here.
+        return None
+
     pr_number = event.get("pull_request", {}).get("number") or event.get("number")
     if not pr_number:
         return None
