@@ -5,7 +5,13 @@ import pytest
 
 from argus.context.gather import Context
 from argus.lenses.base import Finding
-from argus.models.client import _complete, _extract_json, _context_prompt, curate_with_model, generate_pr_summary
+from argus.models.client import (
+    _complete,
+    _extract_json,
+    _context_prompt,
+    curate_with_model,
+    generate_pr_summary,
+)
 
 
 def test_extracts_plain_json_array():
@@ -74,7 +80,9 @@ def test_pr_summary_absent_when_empty():
 
 
 def test_generate_pr_summary_returns_model_output(monkeypatch):
-    monkeypatch.setattr("argus.models.client.completion", _fake_completion("## Intent\nAdds a feature."))
+    monkeypatch.setattr(
+        "argus.models.client.completion", _fake_completion("## Intent\nAdds a feature.")
+    )
     ctx = Context(diff="+x", changed_files=[], pr_title="feat: add thing")
     result = generate_pr_summary(ctx, "model")
     assert "Adds a feature" in result
@@ -83,6 +91,7 @@ def test_generate_pr_summary_returns_model_output(monkeypatch):
 def test_generate_pr_summary_returns_empty_on_error(monkeypatch):
     def boom(**kwargs):
         raise RuntimeError("API down")
+
     monkeypatch.setattr("argus.models.client.completion", boom)
     ctx = Context(diff="+x", changed_files=[])
     assert generate_pr_summary(ctx, "model") == ""
