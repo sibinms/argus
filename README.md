@@ -111,7 +111,6 @@ the workflow, as shown below.
 
 ``` yaml
 - uses: sibinms/argus@v1.2.17
->>>>>>> origin/main
   with:
     anthropic-api-key: ${{ secrets.ANTHROPIC_API_KEY }}
 ```
@@ -120,7 +119,6 @@ the workflow, as shown below.
 
 ``` yaml
 - uses: sibinms/argus@v1.2.17
->>>>>>> origin/main
   env:
     OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
   with:
@@ -132,7 +130,6 @@ the workflow, as shown below.
 
 ``` yaml
 - uses: sibinms/argus@v1.2.17
->>>>>>> origin/main
   env:
     GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
   with:
@@ -144,7 +141,6 @@ the workflow, as shown below.
 
 ``` yaml
 - uses: sibinms/argus@v1.2.17
->>>>>>> origin/main
   env:
     OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
   with:
@@ -169,7 +165,6 @@ both are present, so a workflow-level pick always wins for a quick test.
 
 ``` bash
 pip install "git+https://github.com/sibinms/argus.git@v1.2.17"
->>>>>>> origin/main
 
 argus init
 
