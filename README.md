@@ -110,14 +110,14 @@ the workflow, as shown below.
 **Anthropic**
 
 ``` yaml
-- uses: sibinms/argus@v1.2.20  with:
+- uses: sibinms/argus@v1.2.21  with:
     anthropic-api-key: ${{ secrets.ANTHROPIC_API_KEY }}
 ```
 
 **OpenAI**
 
 ``` yaml
-- uses: sibinms/argus@v1.2.20  env:
+- uses: sibinms/argus@v1.2.21  env:
     OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
   with:
     lens-model: gpt-4o-mini
@@ -127,7 +127,7 @@ the workflow, as shown below.
 **Gemini**
 
 ``` yaml
-- uses: sibinms/argus@v1.2.20  env:
+- uses: sibinms/argus@v1.2.21  env:
     GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
   with:
     lens-model: gemini/gemini-2.5-flash
@@ -137,7 +137,7 @@ the workflow, as shown below.
 **OpenRouter** — one key, hundreds of models across providers.
 
 ``` yaml
-- uses: sibinms/argus@v1.2.20  env:
+- uses: sibinms/argus@v1.2.21  env:
     OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
   with:
     lens-model: openrouter/anthropic/claude-3.5-haiku
@@ -160,7 +160,7 @@ both are present, so a workflow-level pick always wins for a quick test.
 ### CLI
 
 ``` bash
-pip install "git+https://github.com/sibinms/argus.git@v1.2.20"
+pip install "git+https://github.com/sibinms/argus.git@v1.2.21"
 argus init
 
 export ANTHROPIC_API_KEY=...   # or OPENAI_API_KEY, GEMINI_API_KEY, ...
