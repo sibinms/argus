@@ -11,7 +11,16 @@ import yaml
 
 DEFAULT_CONFIG_PATH = Path(".argus/config.yml")
 
-BUILTIN_LENSES = ["security", "tests", "error_handling", "contracts", "correctness"]
+BUILTIN_LENSES = [
+    "security",
+    "tests",
+    "error_handling",
+    "contracts",
+    "correctness",
+    "deleted_code",
+    "reuse",
+    "efficiency",
+]
 
 
 @dataclass
