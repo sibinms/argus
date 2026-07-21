@@ -62,7 +62,7 @@ def test_complete_sets_a_request_timeout(monkeypatch):
         return resp
 
     monkeypatch.setattr("argus.models.client.completion", fake_completion)
-    _complete("sys", "user", "m", 100)
+    _complete("sys", "user", "m")
     assert captured.get("timeout")
 
 
