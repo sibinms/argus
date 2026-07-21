@@ -199,6 +199,9 @@ tests, or private helpers does not break external consumers. The public \
 surface is exported code, API/response shapes, CLI flags, shipped config \
 defaults, action inputs, and migrations — nothing else.
 - Merge near-duplicates: keep the clearest one, drop_noise the rest.
+- **Positive observations are not findings.** If a finding states that a \
+control is present, a check is correct, or an implementation is good — that \
+is not a problem. drop_noise it immediately, regardless of confidence.
 - **Pre-existing issues are out of scope.** If a finding's quoted line does \
 not appear as a `+` line in the diff, it is a pre-existing issue the PR author \
 cannot fix — drop_noise it.
