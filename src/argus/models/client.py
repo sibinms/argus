@@ -46,9 +46,10 @@ def _extract_json(text: str):
 
 
 PLANNER_SYSTEM_PROMPT = """\
-You are writing a one-page technical brief for a panel of five independent code \
+You are writing a one-page technical brief for a panel of eight independent code \
 reviewers. Each reviewer specialises in a single narrow angle (security, tests, \
-error handling, contracts, correctness) and shares no notes with the others, so \
+error handling, contracts, correctness, deleted-code behaviour, reuse of existing \
+helpers, efficiency) and shares no notes with the others, so \
 this brief is the only shared context they have.
 
 Read the pull request below and produce a brief with exactly these three sections:
@@ -186,6 +187,13 @@ quote in evidence_quote.
 Keep it at low confidence rather than deleting it.
 
 Rules:
+- **PLAUSIBLE by default.** Do not drop a finding for being "speculative" or \
+"depends on runtime state" when the scenario is realistic: concurrency races, \
+None on a rare-but-reachable path (error handler, missing optional field), \
+falsy-zero treated as missing, off-by-one on a boundary the code does not \
+exclude, retry storms or partial failures. These are PLAUSIBLE — downgrade \
+rather than drop. Only use "drop" when you can quote the actual code that \
+disproves the claim.
 - Never use "drop" (factual) without a real quote. "I doubt it" is not grounds; \
 use "downgrade".
 - Prefer "drop_noise" for pure narration and mis-scoped impact; reserve "drop" \
@@ -195,10 +203,9 @@ tests, or private helpers does not break external consumers. The public \
 surface is exported code, API/response shapes, CLI flags, shipped config \
 defaults, action inputs, and migrations — nothing else.
 - Merge near-duplicates: keep the clearest one, drop_noise the rest.
-- Pre-existing issues are out of scope. If a finding describes a problem in \
-code that was NOT added or changed by this PR (i.e. the quoted line does not \
-appear as a `+` line in the diff), drop_noise it — the PR author cannot fix \
-what they didn't touch, and the finding has nothing to do with this change.
+- **Pre-existing issues are out of scope.** If a finding's quoted line does \
+not appear as a `+` line in the diff, it is a pre-existing issue the PR author \
+cannot fix — drop_noise it.
 
 Respond with JSON only: a list of objects, one per input finding in the same \
 order, with keys: action (keep|drop_noise|drop|downgrade), confidence \
