@@ -95,10 +95,7 @@ def generate_pr_summary(context: Context, model: str) -> str:
     parts.append(f"# Diff\n```diff\n{context.diff}\n```")
     user_prompt = "\n\n".join(parts)
     try:
-        # Gemini 2.5 Flash uses thinking tokens that count against max_tokens.
-        # A brief with ~300 words needs ~400 real tokens; thinking easily uses
-        # 3000+, so we need a generous budget here or the response is truncated.
-        return _complete(PLANNER_SYSTEM_PROMPT, user_prompt, model, max_tokens=8192)
+        return _complete(PLANNER_SYSTEM_PROMPT, user_prompt, model)
     except Exception:
         return ""
 
@@ -123,10 +120,9 @@ def _context_prompt(context: Context) -> str:
     return "\n\n".join(parts)
 
 
-def _complete(system_prompt: str, user_prompt: str, model: str, max_tokens: int) -> str:
+def _complete(system_prompt: str, user_prompt: str, model: str) -> str:
     response = completion(
         model=model,
-        max_tokens=max_tokens,
         messages=[
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_prompt},
@@ -136,8 +132,8 @@ def _complete(system_prompt: str, user_prompt: str, model: str, max_tokens: int)
     return response.choices[0].message.content or ""
 
 
-def run_lens(lens: Lens, context: Context, model: str, max_tokens: int = 4096) -> list[Finding]:
-    text = _complete(lens.system_prompt(), _context_prompt(context), model, max_tokens)
+def run_lens(lens: Lens, context: Context, model: str) -> list[Finding]:
+    text = _complete(lens.system_prompt(), _context_prompt(context), model)
 
     try:
         raw_findings = _extract_json(text)
@@ -214,7 +210,7 @@ sentence), and evidence_quote (a real quote justifying a "drop", or null)."""
 
 
 def curate_with_model(
-    findings: list[Finding], context: Context, model: str, max_tokens: int = 4096
+    findings: list[Finding], context: Context, model: str
 ) -> list[dict]:
     if not findings:
         return []
@@ -240,7 +236,7 @@ def curate_with_model(
         + "\n```"
     )
 
-    text = _complete(CURATOR_SYSTEM_PROMPT, user_prompt, model, max_tokens)
+    text = _complete(CURATOR_SYSTEM_PROMPT, user_prompt, model)
 
     try:
         decisions = _extract_json(text)
