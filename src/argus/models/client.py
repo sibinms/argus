@@ -209,9 +209,7 @@ order, with keys: action (keep|drop_noise|drop|downgrade), confidence \
 sentence), and evidence_quote (a real quote justifying a "drop", or null)."""
 
 
-def curate_with_model(
-    findings: list[Finding], context: Context, model: str
-) -> list[dict]:
+def curate_with_model(findings: list[Finding], context: Context, model: str) -> list[dict]:
     if not findings:
         return []
 
