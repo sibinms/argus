@@ -195,6 +195,10 @@ tests, or private helpers does not break external consumers. The public \
 surface is exported code, API/response shapes, CLI flags, shipped config \
 defaults, action inputs, and migrations — nothing else.
 - Merge near-duplicates: keep the clearest one, drop_noise the rest.
+- Pre-existing issues are out of scope. If a finding describes a problem in \
+code that was NOT added or changed by this PR (i.e. the quoted line does not \
+appear as a `+` line in the diff), drop_noise it — the PR author cannot fix \
+what they didn't touch, and the finding has nothing to do with this change.
 
 Respond with JSON only: a list of objects, one per input finding in the same \
 order, with keys: action (keep|drop_noise|drop|downgrade), confidence \
