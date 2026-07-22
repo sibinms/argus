@@ -80,32 +80,16 @@ reviewers as plain Markdown (see [Writing Custom Lenses](#writing-custom-lenses)
 
 ## Features
 
-  -----------------------------------------------------------------------
-  Feature                     Description
-  --------------------------- -------------------------------------------
-  Planner                     One cheap call reads the PR first and
-                              briefs every lens on intent, invariants
-                              and what to check.
-
-  Eight Parallel Lenses       Independent reviewers, each focused on a
-                              different problem domain, plus any you add.
-
-  Evidence-Based Curation     Findings are removed only when evidence
-                              contradicts them.
-
-  Provider Agnostic           Works with OpenAI, Anthropic, Gemini,
-                              OpenRouter and any LiteLLM provider.
-
-  Custom Lenses               Create new reviewers using Markdown.
-
-  Shadow Mode                 Generate reports without commenting on PRs.
-
-  Active Mode                 Publish inline comments and review
-                              verdicts.
-
-  Recall Evaluation           Benchmark prompt changes against known
-                              bugs.
-  -----------------------------------------------------------------------
+| Feature | Description |
+| --- | --- |
+| Planner | One cheap call reads the PR first and briefs every lens on intent, invariants and what to check. |
+| Eight Parallel Lenses | Independent reviewers, each focused on a different problem domain, plus any you add. |
+| Evidence-Based Curation | Findings are removed only when evidence contradicts them. |
+| Provider Agnostic | Works with OpenAI, Anthropic, Gemini, OpenRouter and any LiteLLM provider. |
+| Custom Lenses | Create new reviewers using Markdown. |
+| Shadow Mode | Generate reports without commenting on PRs. |
+| Active Mode | Publish inline comments and review verdicts. |
+| Recall Evaluation | Benchmark prompt changes against known bugs. |
 
 ------------------------------------------------------------------------
 
@@ -121,14 +105,16 @@ the workflow, as shown below.
 **Anthropic**
 
 ``` yaml
-- uses: sibinms/argus@v1.2.21  with:
+- uses: sibinms/argus@v1.2.21
+  with:
     anthropic-api-key: ${{ secrets.ANTHROPIC_API_KEY }}
 ```
 
 **OpenAI**
 
 ``` yaml
-- uses: sibinms/argus@v1.2.21  env:
+- uses: sibinms/argus@v1.2.21
+  env:
     OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
   with:
     lens-model: gpt-4o-mini
@@ -138,7 +124,8 @@ the workflow, as shown below.
 **Gemini**
 
 ``` yaml
-- uses: sibinms/argus@v1.2.21  env:
+- uses: sibinms/argus@v1.2.21
+  env:
     GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
   with:
     lens-model: gemini/gemini-2.5-flash
@@ -148,7 +135,8 @@ the workflow, as shown below.
 **OpenRouter** — one key, hundreds of models across providers.
 
 ``` yaml
-- uses: sibinms/argus@v1.2.21  env:
+- uses: sibinms/argus@v1.2.21
+  env:
     OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
   with:
     lens-model: openrouter/anthropic/claude-3.5-haiku
