@@ -296,9 +296,12 @@ def post_to_github(
     except GithubException as e:
         status = getattr(e, "status", None)
         message = str(e).lower()
-        if status == 422 and "not permitted to approve" in message:
+        if status == 422 and (
+            "not permitted to approve" in message
+            or "request changes on your own pull request" in message
+        ):
             pr.create_review(body=review_body, event="COMMENT", comments=new_comments)
         elif new_comments and status == 422:
-            pr.create_review(body=review_body, event=event)
+            pr.create_review(body=review_body, event="COMMENT")
         else:
             raise
