@@ -96,6 +96,9 @@ python eval/run_eval.py
 - Make fail-open logs actionable: identify the failed stage or lens and retain
   useful exception context, while never including credentials or other secret
   values.
+- Give every model-provider call, GitHub/API request, raw HTTP request, and
+  subprocess invocation an explicit finite timeout so an unresponsive external
+  dependency cannot stall the review indefinitely.
 - Do not broaden context collection casually. Narrow context limits are part of
   the product behavior, not just an optimization.
 
