@@ -6,6 +6,7 @@ import pytest
 from argus.context.gather import Context
 from argus.lenses.base import Finding, Lens
 from argus.models.client import (
+    _coerce_line,
     _complete,
     _context_prompt,
     _extract_json,
@@ -96,6 +97,29 @@ def test_generate_pr_summary_returns_empty_on_error(monkeypatch):
     monkeypatch.setattr("argus.models.client.completion", boom)
     ctx = Context(diff="+x", changed_files=[])
     assert generate_pr_summary(ctx, "model") == ""
+
+
+def test_coerce_line_accepts_int():
+    assert _coerce_line(42) == 42
+
+
+def test_coerce_line_accepts_none():
+    assert _coerce_line(None) is None
+
+
+def test_coerce_line_rejects_bool():
+    # bool is a subclass of int in Python; a lens has no business reporting
+    # True/False as a line number, so treat it as absent rather than 1/0.
+    assert _coerce_line(True) is None
+    assert _coerce_line(False) is None
+
+
+def test_coerce_line_rejects_float():
+    assert _coerce_line(4.2) is None
+
+
+def test_coerce_line_rejects_list():
+    assert _coerce_line([42]) is None
 
 
 def test_run_lens_coerces_string_line_numbers_to_int(monkeypatch):
