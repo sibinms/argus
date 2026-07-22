@@ -21,13 +21,20 @@ models:
   # lens: openrouter/anthropic/claude-3.5-haiku
   # curator: openrouter/anthropic/claude-3.5-sonnet
 
-# Built-in lenses: security, tests, error_handling, contracts
+# Built-in lenses: security, tests, error_handling, contracts, correctness,
+# deleted_code, reuse, efficiency. A shared planner call runs first and
+# briefs every lens on the PR's intent and invariants — see "How it works"
+# in the README.
 # Add your own by pointing at a markdown file, see docs/writing-a-lens.md
 lenses:
   - security
   - tests
   - error_handling
   - contracts
+  - correctness
+  - deleted_code
+  - reuse
+  - efficiency
   # - custom: .argus/lenses/payment-safety.md
 
 context:
@@ -38,6 +45,9 @@ context:
     - "*.lock"
     - "*.min.js"
     - "*/migrations/*"
+    - "package-lock.json"
+    - "yarn.lock"
+    - "pnpm-lock.yaml"
 
 posting:
   min_confidence: medium   # low | medium | high

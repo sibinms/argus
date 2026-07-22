@@ -18,12 +18,19 @@ lenses:
   - tests
   - error_handling
   - contracts
+  - correctness
+  - deleted_code
+  - reuse
+  - efficiency
 
 context:
   ignore_globs:
     - "*.lock"
     - "*.min.js"
     - "*/migrations/*"
+    - "package-lock.json"
+    - "yarn.lock"
+    - "pnpm-lock.yaml"
     # Eval fixtures are intentionally-buggy synthetic examples (that's the
     # point of them) — without this, Argus reviews its own test data as if
     # it were real application code and flags the deliberate bug in it.
