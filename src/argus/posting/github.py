@@ -302,6 +302,9 @@ def post_to_github(
         ):
             pr.create_review(body=review_body, event="COMMENT", comments=new_comments)
         elif new_comments and status == 422:
+            # The inline comment landed on a line outside the diff; retry body-only.
+            # Use COMMENT rather than the original event so REQUEST_CHANGES doesn't
+            # cause a second 422 when the token owner is the PR author.
             pr.create_review(body=review_body, event="COMMENT")
         else:
             raise
