@@ -162,6 +162,67 @@ def test_explicit_empty_string_model_flags_are_a_no_op(tmp_path, monkeypatch):
     assert seen_configs[0].models.curator == default.models.curator
 
 
+def test_github_app_credentials_used_when_both_present(tmp_path, monkeypatch):
+    monkeypatch.setenv("GITHUB_APP_ID", "123")
+    monkeypatch.setenv("GITHUB_APP_PRIVATE_KEY", "-----BEGIN RSA PRIVATE KEY-----\n...")
+    monkeypatch.delenv("GITHUB_TOKEN", raising=False)
+
+    captured = {}
+    monkeypatch.setattr(
+        cli, "get_installation_token", lambda app_id, key, repo: "app-installation-token"
+    )
+    monkeypatch.setattr(
+        cli,
+        "gather_github",
+        lambda repo, pr, token, ctx: captured.update(token=token) or object(),
+    )
+    monkeypatch.setattr(cli, "run_review", lambda context, config: [])
+    monkeypatch.setattr(cli, "post_to_github", lambda *a, **k: None)
+
+    runner = CliRunner()
+    result = runner.invoke(cli.main, ["review", "--github", "--repo", "o/r", "--pr", "1"])
+
+    assert result.exit_code == 0
+    assert captured["token"] == "app-installation-token"
+
+
+def test_falls_back_to_github_token_when_app_credentials_absent(tmp_path, monkeypatch):
+    monkeypatch.delenv("GITHUB_APP_ID", raising=False)
+    monkeypatch.delenv("GITHUB_APP_PRIVATE_KEY", raising=False)
+    monkeypatch.setenv("GITHUB_TOKEN", "plain-pat-token")
+
+    def boom(*a, **k):
+        raise AssertionError("get_installation_token should not be called")
+
+    captured = {}
+    monkeypatch.setattr(cli, "get_installation_token", boom)
+    monkeypatch.setattr(
+        cli,
+        "gather_github",
+        lambda repo, pr, token, ctx: captured.update(token=token) or object(),
+    )
+    monkeypatch.setattr(cli, "run_review", lambda context, config: [])
+    monkeypatch.setattr(cli, "post_to_github", lambda *a, **k: None)
+
+    runner = CliRunner()
+    result = runner.invoke(cli.main, ["review", "--github", "--repo", "o/r", "--pr", "1"])
+
+    assert result.exit_code == 0
+    assert captured["token"] == "plain-pat-token"
+
+
+def test_github_without_any_credentials_raises_clean_error(tmp_path, monkeypatch):
+    monkeypatch.delenv("GITHUB_APP_ID", raising=False)
+    monkeypatch.delenv("GITHUB_APP_PRIVATE_KEY", raising=False)
+    monkeypatch.delenv("GITHUB_TOKEN", raising=False)
+
+    runner = CliRunner()
+    result = runner.invoke(cli.main, ["review", "--github", "--repo", "o/r", "--pr", "1"])
+
+    assert result.exit_code != 0
+    assert "GITHUB_TOKEN" in str(result.output) or "GITHUB_APP" in str(result.output)
+
+
 def test_model_flags_absent_leave_config_defaults(tmp_path, monkeypatch):
     _make_repo_with_diff(tmp_path)
     monkeypatch.chdir(tmp_path)
