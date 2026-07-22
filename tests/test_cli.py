@@ -295,6 +295,28 @@ def test_github_app_auth_failure_raises_clean_error(tmp_path, monkeypatch):
     assert "Traceback" not in result.output
 
 
+def test_github_app_auth_github_exception_raises_clean_error(tmp_path, monkeypatch):
+    """The same clean-error wrapping must also apply to GithubException (e.g.
+    the App isn't installed on this repo, or the key is invalid) — not just
+    ValueError from our own input validation."""
+    from github.GithubException import GithubException
+
+    monkeypatch.setenv("GITHUB_APP_ID", "123")
+    monkeypatch.setenv("GITHUB_APP_PRIVATE_KEY", "-----BEGIN RSA PRIVATE KEY-----\n...")
+
+    def boom(app_id, key, repo):
+        raise GithubException(404, {"message": "Not Found"}, None)
+
+    monkeypatch.setattr(cli, "get_installation_token", boom)
+
+    runner = CliRunner()
+    result = runner.invoke(cli.main, ["review", "--github", "--repo", "o/r", "--pr", "1"])
+
+    assert result.exit_code != 0
+    assert "GitHub App authentication failed" in result.output
+    assert "Traceback" not in result.output
+
+
 def test_model_flags_absent_leave_config_defaults(tmp_path, monkeypatch):
     _make_repo_with_diff(tmp_path)
     monkeypatch.chdir(tmp_path)

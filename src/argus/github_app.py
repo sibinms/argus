@@ -29,6 +29,8 @@ def get_installation_token(app_id: str, private_key: str, repo: str) -> str:
     except ValueError:
         raise ValueError(f"GITHUB_APP_ID must be numeric, got {app_id!r}") from None
 
-    integration = GithubIntegration(app_id, private_key)
+    # Explicit timeout, matching the rest of the codebase (Github(token,
+    # timeout=30) elsewhere) — never let a stalled GitHub API hang the CLI.
+    integration = GithubIntegration(app_id, private_key, timeout=30)
     installation = integration.get_repo_installation(owner, name)
     return integration.get_access_token(installation.id).token

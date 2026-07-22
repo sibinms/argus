@@ -15,9 +15,10 @@ def test_get_installation_token_splits_repo_and_returns_token(monkeypatch):
 
     captured = {}
 
-    def fake_integration(app_id, private_key):
+    def fake_integration(app_id, private_key, **kwargs):
         captured["app_id"] = app_id
         captured["private_key"] = private_key
+        captured["kwargs"] = kwargs
         return integration
 
     monkeypatch.setattr("argus.github_app.GithubIntegration", fake_integration)
@@ -26,6 +27,7 @@ def test_get_installation_token_splits_repo_and_returns_token(monkeypatch):
 
     assert token == "ghs_installation-token"
     assert captured["app_id"] == "123"
+    assert captured["kwargs"]["timeout"] == 30
     integration.get_repo_installation.assert_called_once_with("owner", "repo")
     integration.get_access_token.assert_called_once_with(42)
 
