@@ -1,83 +1,21 @@
-<svg viewBox="0 0 1060 470" xmlns="http://www.w3.org/2000/svg" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" role="img" aria-label="Argus pipeline: a pull request fans out to parallel lenses on a cheap model, converges on a curator on a strong model that drops findings only with a cited quote, and posts one GitHub review verdict.">
-  <defs>
-    <linearGradient id="grad" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0" stop-color="#8f83ff"/><stop offset="1" stop-color="#b18cff"/>
-    </linearGradient>
-    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
-      <path d="M0 0 L10 5 L0 10 z" fill="#a09bb0"/>
-    </marker>
-  </defs>
-
-  <g fill="none" stroke="#a09bb0" stroke-width="1.6" marker-end="url(#arrow)">
-    <path d="M196 235 C240 235, 250 96, 292 96"/>
-    <path d="M196 235 C240 235, 250 166, 292 166"/>
-    <path d="M196 235 C245 235, 260 235, 292 235"/>
-    <path d="M196 235 C240 235, 250 304, 292 304"/>
-    <path d="M196 235 C240 235, 250 374, 292 374"/>
-    <path d="M488 96 C560 96, 560 210, 636 210"/>
-    <path d="M488 166 C560 166, 560 218, 636 218"/>
-    <path d="M488 235 C560 235, 570 235, 636 235"/>
-    <path d="M488 304 C560 304, 560 252, 636 252"/>
-    <path d="M488 374 C560 374, 560 260, 636 260"/>
-    <path d="M852 210 C888 210, 895 150, 924 150"/>
-    <path d="M852 235 C888 235, 895 235, 924 235"/>
-    <path d="M852 260 C888 260, 895 320, 924 320"/>
-  </g>
-
-  <g>
-    <rect x="36" y="196" width="160" height="80" rx="14" fill="#201d2a" stroke="#2d2939"/>
-    <circle cx="66" cy="224" r="4.5" fill="url(#grad)"/><circle cx="66" cy="250" r="4.5" fill="url(#grad)"/>
-    <path d="M66 228 v18" stroke="url(#grad)" stroke-width="2" fill="none"/>
-    <text x="86" y="228" font-size="14" font-weight="650" fill="#eceaf3">Pull Request</text>
-    <text x="86" y="248" font-size="10.5" font-family="ui-monospace, Menlo, Consolas, monospace" fill="#a09bb0">diff · files · intent</text>
-  </g>
-
-  <text x="292" y="52" font-size="10.5" font-family="ui-monospace, Menlo, Consolas, monospace" letter-spacing="0.4" fill="#8f83ff">LENSES · IN PARALLEL · CHEAP MODEL · TOLD TO OVER-REPORT</text>
-
-  <g font-size="13" font-weight="650">
-    <g>
-      <rect x="292" y="72" width="196" height="48" rx="11" fill="#211f39" stroke="#8f83ff" stroke-opacity="0.5"/>
-      <circle cx="318" cy="96" r="9" fill="none" stroke="#8f83ff" stroke-width="1.6"/><circle cx="318" cy="96" r="3.4" fill="#8f83ff"/>
-      <text x="338" y="101" fill="#eceaf3">Security</text>
-    </g>
-    <g>
-      <rect x="292" y="142" width="196" height="48" rx="11" fill="#211f39" stroke="#8f83ff" stroke-opacity="0.5"/>
-      <circle cx="318" cy="166" r="9" fill="none" stroke="#8f83ff" stroke-width="1.6"/><circle cx="318" cy="166" r="3.4" fill="#8f83ff"/>
-      <text x="338" y="171" fill="#eceaf3">Tests</text>
-    </g>
-    <g>
-      <rect x="292" y="211" width="196" height="48" rx="11" fill="#211f39" stroke="#8f83ff" stroke-opacity="0.5"/>
-      <circle cx="318" cy="235" r="9" fill="none" stroke="#8f83ff" stroke-width="1.6"/><circle cx="318" cy="235" r="3.4" fill="#8f83ff"/>
-      <text x="338" y="240" fill="#eceaf3">Error handling</text>
-    </g>
-    <g>
-      <rect x="292" y="280" width="196" height="48" rx="11" fill="#211f39" stroke="#8f83ff" stroke-opacity="0.5"/>
-      <circle cx="318" cy="304" r="9" fill="none" stroke="#8f83ff" stroke-width="1.6"/><circle cx="318" cy="304" r="3.4" fill="#8f83ff"/>
-      <text x="338" y="309" fill="#eceaf3">Contracts</text>
-    </g>
-    <g>
-      <rect x="292" y="350" width="196" height="48" rx="11" fill="#201d2a" stroke="#4a4658" stroke-dasharray="4 4"/>
-      <circle cx="318" cy="374" r="9" fill="none" stroke="#a09bb0" stroke-width="1.6"/><circle cx="318" cy="374" r="3.4" fill="#a09bb0"/>
-      <text x="338" y="379" fill="#a09bb0">…your own (Markdown)</text>
-    </g>
-  </g>
-
-  <g>
-    <rect x="636" y="182" width="216" height="106" rx="16" fill="url(#grad)"/>
-    <path d="M664 214 l16 -6 l16 6 v14 c0 11 -7 19 -16 23 c-9 -4 -16 -12 -16 -23 z" fill="none" stroke="#12101a" stroke-width="2" stroke-linejoin="round"/>
-    <text x="700" y="222" font-size="15" font-weight="650" fill="#12101a">Curator</text>
-    <text x="700" y="242" font-size="10.5" font-family="ui-monospace, Menlo, Consolas, monospace" fill="#12101a" fill-opacity="0.85">strong model</text>
-    <text x="664" y="270" font-size="10" font-family="ui-monospace, Menlo, Consolas, monospace" fill="#12101a" fill-opacity="0.85">merge · verify · drop only with a cited quote</text>
-  </g>
-
-  <g font-size="12.5" font-weight="650">
-    <rect x="924" y="130" width="128" height="40" rx="10" fill="#16281c" stroke="#4ade80" stroke-opacity="0.55"/>
-    <text x="944" y="155" fill="#4ade80">✓ Approve</text>
-    <rect x="924" y="215" width="128" height="40" rx="10" fill="#2a2113" stroke="#fbbf24" stroke-opacity="0.55"/>
-    <text x="944" y="240" fill="#fbbf24">💬 Comment</text>
-    <rect x="924" y="300" width="128" height="40" rx="10" fill="#2c1717" stroke="#f87171" stroke-opacity="0.55"/>
-    <text x="944" y="325" fill="#f87171">✗ Changes</text>
-  </g>
-
-  <text x="530" y="442" font-size="11" font-family="ui-monospace, Menlo, Consolas, monospace" fill="#a09bb0" text-anchor="middle">posted as one GitHub review · any provider via litellm (Anthropic · OpenAI · Gemini · OpenRouter)</text>
+<svg viewBox="0 0 1500 260" xmlns="http://www.w3.org/2000/svg" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" role="img" aria-label="Argus pipeline: a pull request is read by a planner that writes a shared review brief, which fans out to nine parallel lenses on a cheap model, converges on a curator on a strong model that drops findings only with a cited quote, and posts one GitHub review verdict.">
+<defs><linearGradient id="grad" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#8f83ff"/><stop offset="1" stop-color="#b18cff"/></linearGradient><marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="#a09bb0"/></marker></defs>
+<g fill="none" stroke="#a09bb0" stroke-width="1.6" marker-end="url(#arrow)"><path d="M196 130 C214 130, 214 130, 232 130"/><path d="M408 130 C433 130, 433 76, 458 76"/><path d="M640 76 C861 76, 861 130, 1082 130"/><path d="M408 130 C531 130, 531 76, 654 76"/><path d="M836 76 C959 76, 959 130, 1082 130"/><path d="M408 130 C629 130, 629 76, 850 76"/><path d="M1032 76 C1057 76, 1057 130, 1082 130"/><path d="M408 130 C433 130, 433 130, 458 130"/><path d="M640 130 C861 130, 861 130, 1082 130"/><path d="M408 130 C531 130, 531 130, 654 130"/><path d="M836 130 C959 130, 959 130, 1082 130"/><path d="M408 130 C629 130, 629 130, 850 130"/><path d="M1032 130 C1057 130, 1057 130, 1082 130"/><path d="M408 130 C433 130, 433 184, 458 184"/><path d="M640 184 C861 184, 861 130, 1082 130"/><path d="M408 130 C531 130, 531 184, 654 184"/><path d="M836 184 C959 184, 959 130, 1082 130"/><path d="M408 130 C629 130, 629 184, 850 184"/><path d="M1032 184 C1057 184, 1057 130, 1082 130"/><path d="M1302 130 C1327 130, 1327 70, 1352 70"/><path d="M1302 130 C1327 130, 1327 130, 1352 130"/><path d="M1302 130 C1327 130, 1327 190, 1352 190"/></g>
+<rect x="36" y="90" width="160" height="80" rx="14" fill="#201d2a" stroke="#2d2939"/><circle cx="66" cy="118" r="4.5" fill="url(#grad)"/><circle cx="66" cy="144" r="4.5" fill="url(#grad)"/><path d="M66 122 v18" stroke="url(#grad)" stroke-width="2" fill="none"/><text x="86" y="122" font-size="14" font-weight="650" fill="#eceaf3">Pull Request</text><text x="86" y="142" font-size="10.5" font-family="ui-monospace, Menlo, Consolas, monospace" fill="#a09bb0">diff · files · intent</text>
+<rect x="232" y="85" width="176" height="90" rx="14" fill="#0f2a27" stroke="#2dd4bf" stroke-opacity="0.6"/><rect x="247" y="119.0" width="18" height="22" rx="2" fill="none" stroke="#2dd4bf" stroke-width="1.6"/><line x1="250" y1="124.0" x2="262" y2="124.0" stroke="#2dd4bf" stroke-width="1.6" stroke-linecap="round"/><line x1="250" y1="129.0" x2="262" y2="129.0" stroke="#2dd4bf" stroke-width="1.6" stroke-linecap="round"/><line x1="250" y1="134.0" x2="262" y2="134.0" stroke="#2dd4bf" stroke-width="1.6" stroke-linecap="round"/><text x="282" y="115" font-size="14" font-weight="650" fill="#5eead4">Planner</text><text x="282" y="135" font-size="10" font-family="ui-monospace, Menlo, Consolas, monospace" fill="#a09bb0">one cheap call, up front</text><text x="282" y="153" font-size="10" font-family="ui-monospace, Menlo, Consolas, monospace" fill="#a09bb0">writes the shared brief</text>
+<text x="458" y="40" font-size="10.5" font-family="ui-monospace, Menlo, Consolas, monospace" letter-spacing="0.4" fill="#8f83ff">LENSES · PARALLEL · CHEAP MODEL · SHARE THE PLANNER'S BRIEF</text>
+<rect x="458" y="54" width="182" height="44" rx="10" fill="#211f39" stroke="#8f83ff" stroke-opacity="0.5"/><circle cx="478" cy="76.0" r="8" fill="none" stroke="#8f83ff" stroke-width="1.6"/><circle cx="478" cy="76.0" r="3" fill="#8f83ff"/><text x="496" y="80.0" font-size="12.5" font-weight="650" fill="#eceaf3">Security</text>
+<rect x="654" y="54" width="182" height="44" rx="10" fill="#211f39" stroke="#8f83ff" stroke-opacity="0.5"/><circle cx="674" cy="76.0" r="8" fill="none" stroke="#8f83ff" stroke-width="1.6"/><circle cx="674" cy="76.0" r="3" fill="#8f83ff"/><text x="692" y="80.0" font-size="12.5" font-weight="650" fill="#eceaf3">Tests</text>
+<rect x="850" y="54" width="182" height="44" rx="10" fill="#211f39" stroke="#8f83ff" stroke-opacity="0.5"/><circle cx="870" cy="76.0" r="8" fill="none" stroke="#8f83ff" stroke-width="1.6"/><circle cx="870" cy="76.0" r="3" fill="#8f83ff"/><text x="888" y="80.0" font-size="12.5" font-weight="650" fill="#eceaf3">Error handling</text>
+<rect x="458" y="108" width="182" height="44" rx="10" fill="#211f39" stroke="#8f83ff" stroke-opacity="0.5"/><circle cx="478" cy="130.0" r="8" fill="none" stroke="#8f83ff" stroke-width="1.6"/><circle cx="478" cy="130.0" r="3" fill="#8f83ff"/><text x="496" y="134.0" font-size="12.5" font-weight="650" fill="#eceaf3">Contracts</text>
+<rect x="654" y="108" width="182" height="44" rx="10" fill="#211f39" stroke="#8f83ff" stroke-opacity="0.5"/><circle cx="674" cy="130.0" r="8" fill="none" stroke="#8f83ff" stroke-width="1.6"/><circle cx="674" cy="130.0" r="3" fill="#8f83ff"/><text x="692" y="134.0" font-size="12.5" font-weight="650" fill="#eceaf3">Correctness</text>
+<rect x="850" y="108" width="182" height="44" rx="10" fill="#211f39" stroke="#8f83ff" stroke-opacity="0.5"/><circle cx="870" cy="130.0" r="8" fill="none" stroke="#8f83ff" stroke-width="1.6"/><circle cx="870" cy="130.0" r="3" fill="#8f83ff"/><text x="888" y="134.0" font-size="12.5" font-weight="650" fill="#eceaf3">Deleted code</text>
+<rect x="458" y="162" width="182" height="44" rx="10" fill="#211f39" stroke="#8f83ff" stroke-opacity="0.5"/><circle cx="478" cy="184.0" r="8" fill="none" stroke="#8f83ff" stroke-width="1.6"/><circle cx="478" cy="184.0" r="3" fill="#8f83ff"/><text x="496" y="188.0" font-size="12.5" font-weight="650" fill="#eceaf3">Reuse</text>
+<rect x="654" y="162" width="182" height="44" rx="10" fill="#211f39" stroke="#8f83ff" stroke-opacity="0.5"/><circle cx="674" cy="184.0" r="8" fill="none" stroke="#8f83ff" stroke-width="1.6"/><circle cx="674" cy="184.0" r="3" fill="#8f83ff"/><text x="692" y="188.0" font-size="12.5" font-weight="650" fill="#eceaf3">Efficiency</text>
+<rect x="850" y="162" width="182" height="44" rx="10" fill="#201d2a" stroke="#4a4658" stroke-dasharray="4 4"/><circle cx="870" cy="184.0" r="8" fill="none" stroke="#a09bb0" stroke-width="1.6"/><circle cx="870" cy="184.0" r="3" fill="#a09bb0"/><text x="888" y="188.0" font-size="12.5" font-weight="650" fill="#a09bb0">…your own</text>
+<rect x="1082" y="74" width="220" height="112" rx="16" fill="url(#grad)"/><path d="M1100 100 l16 -6 l16 6 v14 c0 11 -7 19 -16 23 c-9 -4 -16 -12 -16 -23 z" fill="none" stroke="#12101a" stroke-width="2" stroke-linejoin="round"/><text x="1140" y="112" font-size="15" font-weight="650" fill="#12101a">Curator</text><text x="1140" y="132" font-size="10.5" font-family="ui-monospace, Menlo, Consolas, monospace" fill="#12101a" fill-opacity="0.9">strong model</text><text x="1104" y="160" font-size="10" font-family="ui-monospace, Menlo, Consolas, monospace" fill="#12101a" fill-opacity="0.9">merge · verify · drop only with a cited quote</text>
+<rect x="1352" y="50.0" width="128" height="40" rx="10" fill="#16281c" stroke="#4ade80" stroke-opacity="0.55"/><text x="1372" y="75.0" font-size="12.5" font-weight="650" fill="#4ade80">✓ Approve</text>
+<rect x="1352" y="110.0" width="128" height="40" rx="10" fill="#2a2113" stroke="#fbbf24" stroke-opacity="0.55"/><text x="1372" y="135.0" font-size="12.5" font-weight="650" fill="#fbbf24">💬 Comment</text>
+<rect x="1352" y="170.0" width="128" height="40" rx="10" fill="#2c1717" stroke="#f87171" stroke-opacity="0.55"/><text x="1372" y="195.0" font-size="12.5" font-weight="650" fill="#f87171">✕ Changes</text>
+<text x="750" y="246" font-size="11" font-family="ui-monospace, Menlo, Consolas, monospace" fill="#a09bb0" text-anchor="middle">posted as one GitHub review · any provider via litellm (Anthropic · OpenAI · Gemini · OpenRouter)</text>
 </svg>

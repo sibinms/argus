@@ -24,7 +24,8 @@ on your pull requests.
 
 **Highlights**
 
--   🔍 Parallel specialized reviewers ("lenses")
+-   🧭 A planner briefs every reviewer up front on intent and invariants
+-   🔍 Eight parallel specialized reviewers ("lenses"), plus your own
 -   🧠 Evidence-based curator
 -   🤖 Bring your own LLM (OpenAI, Anthropic, Gemini, OpenRouter, any LiteLLM provider)
 -   🔒 Runs entirely in your GitHub Action or locally
@@ -58,13 +59,19 @@ The goal is simple:
 <p align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="assets/architecture-dark.svg" />
-    <img src="assets/architecture-light.svg" alt="Argus pipeline: a pull request fans out to parallel lenses on a cheap model, converges on a curator on a strong model that drops findings only with a cited quote, and posts one GitHub review verdict." width="100%" />
+    <img src="assets/architecture-light.svg" alt="Argus pipeline: a pull request is read by a planner that writes a shared review brief, which fans out to nine parallel lenses on a cheap model, converges on a curator on a strong model that drops findings only with a cited quote, and posts one GitHub review verdict." width="100%" />
   </picture>
 </p>
 
-A pull request fans out to the four built-in lenses (plus any of your
-own), each reviewing in parallel on a cheap model and told to
-over-report. The curator — on your strong model — merges duplicates and
+A pull request first goes to a **planner** — one cheap call that reads
+the diff and writes a short brief: what the PR is trying to do, what
+invariants must still hold, and specific yes/no questions worth
+checking (including catching typo'd dictionary-key strings, a common
+silent-failure bug). That brief is handed to all eight built-in lenses
+(plus any of your own), which review in parallel on a cheap model and
+are told to over-report — the planner gives them shared context so a
+cross-file or invariant-breaking bug doesn't slip through a narrow
+angle. The curator — on your strong model — merges duplicates and
 drops a finding only when it can quote the diff proving it wrong, then
 posts one verdict as a GitHub review. The `…your own` lens is you: add
 reviewers as plain Markdown (see [Writing Custom Lenses](#writing-custom-lenses)).
@@ -76,8 +83,12 @@ reviewers as plain Markdown (see [Writing Custom Lenses](#writing-custom-lenses)
   -----------------------------------------------------------------------
   Feature                     Description
   --------------------------- -------------------------------------------
-  Parallel Lenses             Independent reviewers focused on different
-                              problem domains.
+  Planner                     One cheap call reads the PR first and
+                              briefs every lens on intent, invariants
+                              and what to check.
+
+  Eight Parallel Lenses       Independent reviewers, each focused on a
+                              different problem domain, plus any you add.
 
   Evidence-Based Curation     Findings are removed only when evidence
                               contradicts them.
