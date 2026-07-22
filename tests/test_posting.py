@@ -182,6 +182,22 @@ def test_falls_back_to_body_only_on_unresolvable_line(monkeypatch):
     assert pr.create_review.call_count == 2
     assert pr.create_review.call_args_list[0].kwargs["comments"]  # first tried inline
     assert not pr.create_review.call_args_list[1].kwargs.get("comments")  # retry body-only
+    assert pr.create_review.call_args_list[1].kwargs["event"] == "COMMENT"  # never REQUEST_CHANGES
+
+
+def test_own_pr_request_changes_falls_back_to_comment(monkeypatch):
+    err = GithubException(
+        422,
+        data={"message": "Review Can not request changes on your own pull request"},
+        headers=None,
+    )
+    pr = _fake_pr([err, None])
+    _patch_github(monkeypatch, pr)
+
+    ghmod.post_to_github("o/r", 1, "tok", [_finding(2)], PostingConfig(min_confidence="low"))
+
+    assert pr.create_review.call_count == 2
+    assert pr.create_review.call_args_list[1].kwargs["event"] == "COMMENT"
 
 
 def test_non_422_error_is_not_masked(monkeypatch):
