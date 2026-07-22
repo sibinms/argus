@@ -180,6 +180,40 @@ argus review --base origin/main --head HEAD \
 
 ------------------------------------------------------------------------
 
+### Other CI (Cloud Build, etc.)
+
+`action.yml` is only a convenience wrapper for GitHub Actions — the CLI
+itself has no GitHub Actions dependency and runs on any CI. On Google
+Cloud Build, install and invoke it directly, passing the repo and PR
+number as Cloud Build substitution variables:
+
+``` yaml
+steps:
+  - name: python:3.12
+    entrypoint: bash
+    args:
+      - -c
+      - |
+        pip install "git+https://github.com/sibinms/argus.git@v1.2.22"
+        argus review \
+          --github \
+          --repo $$REPO_FULL_NAME \
+          --pr $$_PR_NUMBER \
+          --mode active
+    secretEnv:
+      - GITHUB_TOKEN
+      - GEMINI_API_KEY
+```
+
+`GITHUB_TOKEN` reads the PR diff/files and posts the review comment;
+set it — and your model provider's own key — as a Cloud Build secret.
+Any other CI works the same way: the only GitHub Actions-specific bit
+is auto-detecting `--repo`/`--pr` from the Actions event payload, and
+every other CI already exposes its own equivalent build variables for
+that.
+
+------------------------------------------------------------------------
+
 ## Example Review
 
 ``` text
