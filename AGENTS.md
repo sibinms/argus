@@ -47,7 +47,7 @@ Set up a local editable environment:
 pip install -e ".[dev]"
 ```
 
-Run the checks used by CI:
+Run the locally reproducible checks used by CI:
 
 ```bash
 ruff check src tests eval scripts
@@ -58,6 +58,10 @@ bandit -r src
 pip-audit --skip-editable
 pytest
 ```
+
+CI also runs CodeQL and the informational recall eval. CodeQL runs only in
+GitHub Actions; run the eval locally as described below when changing review
+behavior.
 
 Run the recall evaluation when changing prompts, lenses, curation, or model
 behavior:
@@ -100,6 +104,10 @@ python eval/run_eval.py
   Empty strings from Action inputs must be no-ops.
 - GitHub auth prefers `GITHUB_APP_ID` plus `GITHUB_APP_PRIVATE_KEY` when both are
   present, otherwise falls back to `GITHUB_TOKEN`.
+- Treat `GITHUB_APP_PRIVATE_KEY`, provider API keys, and GitHub tokens as
+  secrets: source them only from environment variables or the CI secrets store,
+  never hardcode or commit them, and never include their values in logs or error
+  messages.
 - The planner summary is useful but optional. If planner generation fails, log
   and continue with lenses.
 - Lens output that cannot be parsed should be skipped with a warning, not crash
