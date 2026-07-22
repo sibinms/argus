@@ -185,8 +185,8 @@ intentional bugs.
 - Add a config key in `src/argus/config.py`, document it in
   `.argus/config.yml.example`, and test defaults plus explicit values.
 - Add a built-in lens by creating `src/argus/lenses/builtin/<name>.md`, adding
-  it to `BUILTIN_LENSES`, and updating docs/config examples when it should be
-  enabled by default.
+  its name to `BUILTIN_LENSES` in `src/argus/config.py`, and updating
+  docs/config examples when it should be enabled by default.
 - Change GitHub posting in `src/argus/posting/github.py` with care. Mock GitHub
   objects in tests rather than calling the live API.
 - Change model prompts in `src/argus/models/client.py` or lens Markdown with an
