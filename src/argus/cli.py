@@ -6,6 +6,7 @@ import shutil
 from pathlib import Path
 
 import click
+from github.GithubException import GithubException
 
 from argus.config import DEFAULT_CONFIG_PATH, load_config
 from argus.context.gather import gather_github, gather_local
@@ -107,7 +108,10 @@ def review(
         app_id = os.environ.get("GITHUB_APP_ID")
         app_private_key = os.environ.get("GITHUB_APP_PRIVATE_KEY")
         if app_id and app_private_key:
-            token = get_installation_token(app_id, app_private_key, repo)
+            try:
+                token = get_installation_token(app_id, app_private_key, repo)
+            except (ValueError, GithubException) as exc:
+                raise click.ClickException(f"GitHub App authentication failed: {exc}") from exc
         else:
             token = os.environ.get("GITHUB_TOKEN")
             if not token:

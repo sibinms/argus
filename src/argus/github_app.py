@@ -20,7 +20,15 @@ def get_installation_token(app_id: str, private_key: str, repo: str) -> str:
     """Returns a ~1-hour installation access token scoped to `repo`'s
     installation of the Argus GitHub App. `repo` is "owner/name"; `private_key`
     is the App's PEM-encoded private key content (not a file path)."""
+    if "/" not in repo:
+        raise ValueError(f"repo must be 'owner/name', got {repo!r}")
     owner, name = repo.split("/", 1)
+
+    try:
+        int(app_id)
+    except ValueError:
+        raise ValueError(f"GITHUB_APP_ID must be numeric, got {app_id!r}") from None
+
     integration = GithubIntegration(app_id, private_key)
     installation = integration.get_repo_installation(owner, name)
     return integration.get_access_token(installation.id).token

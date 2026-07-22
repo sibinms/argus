@@ -223,6 +223,78 @@ def test_github_without_any_credentials_raises_clean_error(tmp_path, monkeypatch
     assert "GITHUB_TOKEN" in str(result.output) or "GITHUB_APP" in str(result.output)
 
 
+def test_only_app_id_set_falls_back_to_github_token(tmp_path, monkeypatch):
+    """A half-configured App (id but no key, or vice versa) must not be
+    treated as "App auth is enabled" — fall back to GITHUB_TOKEN, same as
+    when neither is set."""
+    monkeypatch.setenv("GITHUB_APP_ID", "123")
+    monkeypatch.delenv("GITHUB_APP_PRIVATE_KEY", raising=False)
+    monkeypatch.setenv("GITHUB_TOKEN", "plain-pat-token")
+
+    def boom(*a, **k):
+        raise AssertionError("get_installation_token should not be called")
+
+    captured = {}
+    monkeypatch.setattr(cli, "get_installation_token", boom)
+    monkeypatch.setattr(
+        cli,
+        "gather_github",
+        lambda repo, pr, token, ctx: captured.update(token=token) or object(),
+    )
+    monkeypatch.setattr(cli, "run_review", lambda context, config: [])
+    monkeypatch.setattr(cli, "post_to_github", lambda *a, **k: None)
+
+    runner = CliRunner()
+    result = runner.invoke(cli.main, ["review", "--github", "--repo", "o/r", "--pr", "1"])
+
+    assert result.exit_code == 0
+    assert captured["token"] == "plain-pat-token"
+
+
+def test_only_app_private_key_set_falls_back_to_github_token(tmp_path, monkeypatch):
+    monkeypatch.delenv("GITHUB_APP_ID", raising=False)
+    monkeypatch.setenv("GITHUB_APP_PRIVATE_KEY", "-----BEGIN RSA PRIVATE KEY-----\n...")
+    monkeypatch.setenv("GITHUB_TOKEN", "plain-pat-token")
+
+    def boom(*a, **k):
+        raise AssertionError("get_installation_token should not be called")
+
+    captured = {}
+    monkeypatch.setattr(cli, "get_installation_token", boom)
+    monkeypatch.setattr(
+        cli,
+        "gather_github",
+        lambda repo, pr, token, ctx: captured.update(token=token) or object(),
+    )
+    monkeypatch.setattr(cli, "run_review", lambda context, config: [])
+    monkeypatch.setattr(cli, "post_to_github", lambda *a, **k: None)
+
+    runner = CliRunner()
+    result = runner.invoke(cli.main, ["review", "--github", "--repo", "o/r", "--pr", "1"])
+
+    assert result.exit_code == 0
+    assert captured["token"] == "plain-pat-token"
+
+
+def test_github_app_auth_failure_raises_clean_error(tmp_path, monkeypatch):
+    """A network/API failure minting the installation token must surface as
+    a clean ClickException, not a raw traceback."""
+    monkeypatch.setenv("GITHUB_APP_ID", "123")
+    monkeypatch.setenv("GITHUB_APP_PRIVATE_KEY", "-----BEGIN RSA PRIVATE KEY-----\n...")
+
+    def boom(app_id, key, repo):
+        raise ValueError("GITHUB_APP_ID must be numeric, got 'abc'")
+
+    monkeypatch.setattr(cli, "get_installation_token", boom)
+
+    runner = CliRunner()
+    result = runner.invoke(cli.main, ["review", "--github", "--repo", "o/r", "--pr", "1"])
+
+    assert result.exit_code != 0
+    assert "GitHub App authentication failed" in result.output
+    assert "Traceback" not in result.output
+
+
 def test_model_flags_absent_leave_config_defaults(tmp_path, monkeypatch):
     _make_repo_with_diff(tmp_path)
     monkeypatch.chdir(tmp_path)
