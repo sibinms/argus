@@ -1,10 +1,14 @@
 name: Argus review
 
 # Dogfooding: Argus reviews pull requests on its own repo.
-# Fires on any PR (feature -> develop, develop -> main, etc.).
+# Fires on feature -> develop PRs. Excludes PRs targeting main: those are
+# develop -> main release PRs, re-reviewing a diff whose commits were each
+# already reviewed individually on the way into develop.
 on:
   pull_request:
     types: [opened, synchronize, reopened]
+    branches-ignore:
+      - main
 
 permissions:
   contents: read

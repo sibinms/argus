@@ -4,13 +4,15 @@ from unittest.mock import MagicMock
 import pytest
 
 from argus.context.gather import Context
-from argus.lenses.base import Finding
+from argus.lenses.base import Finding, Lens
 from argus.models.client import (
+    _coerce_line,
     _complete,
     _context_prompt,
     _extract_json,
     curate_with_model,
     generate_pr_summary,
+    run_lens,
 )
 
 
@@ -95,6 +97,91 @@ def test_generate_pr_summary_returns_empty_on_error(monkeypatch):
     monkeypatch.setattr("argus.models.client.completion", boom)
     ctx = Context(diff="+x", changed_files=[])
     assert generate_pr_summary(ctx, "model") == ""
+
+
+def test_generate_pr_summary_preserves_the_documented_brief_sections(monkeypatch):
+    # PLANNER_SYSTEM_PROMPT asks the model for three named sections. This
+    # doesn't validate the model's compliance (that's on the model), but it
+    # does prove generate_pr_summary passes a compliant brief through intact
+    # rather than truncating or reformatting it.
+    brief = (
+        "## Intent\nAdds a feature.\n\n"
+        "## Key invariants\n- thing stays true\n\n"
+        "## What to verify\n- does X happen?"
+    )
+    monkeypatch.setattr("argus.models.client.completion", _fake_completion(brief))
+    ctx = Context(diff="+x", changed_files=[])
+    result = generate_pr_summary(ctx, "model")
+    assert "## Intent" in result
+    assert "## Key invariants" in result
+    assert "## What to verify" in result
+
+
+def test_generate_pr_summary_logs_warning_on_error(monkeypatch, caplog):
+    def boom(**kwargs):
+        raise RuntimeError("API down")
+
+    monkeypatch.setattr("argus.models.client.completion", boom)
+    ctx = Context(diff="+x", changed_files=[])
+    with caplog.at_level("WARNING"):
+        generate_pr_summary(ctx, "model")
+    assert "planner failed" in caplog.text
+
+
+def test_run_lens_logs_warning_on_unparseable_output(monkeypatch, caplog):
+    monkeypatch.setattr("argus.models.client.completion", _fake_completion("not json at all"))
+    lens = Lens(name="security", instructions="look for problems")
+    with caplog.at_level("WARNING"):
+        findings = run_lens(lens, Context(diff="+x", changed_files=[]), "m")
+    assert findings == []
+    assert "security" in caplog.text
+
+
+def test_coerce_line_accepts_int():
+    assert _coerce_line(42) == 42
+
+
+def test_coerce_line_accepts_none():
+    assert _coerce_line(None) is None
+
+
+def test_coerce_line_rejects_bool():
+    # bool is a subclass of int in Python; a lens has no business reporting
+    # True/False as a line number, so treat it as absent rather than 1/0.
+    assert _coerce_line(True) is None
+    assert _coerce_line(False) is None
+
+
+def test_coerce_line_rejects_float():
+    assert _coerce_line(4.2) is None
+
+
+def test_coerce_line_rejects_list():
+    assert _coerce_line([42]) is None
+
+
+def test_run_lens_coerces_string_line_numbers_to_int(monkeypatch):
+    # Some models return "line" as a numeric string rather than an int. If it
+    # isn't coerced, Finding.line ends up a str, which later blows up the
+    # curator's dedupe distance check (int - str).
+    monkeypatch.setattr(
+        "argus.models.client.completion",
+        _fake_completion('[{"summary": "s", "line": "42"}]'),
+    )
+    lens = Lens(name="x", instructions="look for problems")
+    findings = run_lens(lens, Context(diff="+x", changed_files=[]), "m")
+    assert findings[0].line == 42
+    assert isinstance(findings[0].line, int)
+
+
+def test_run_lens_drops_unparseable_line_to_none(monkeypatch):
+    monkeypatch.setattr(
+        "argus.models.client.completion",
+        _fake_completion('[{"summary": "s", "line": "not-a-number"}]'),
+    )
+    lens = Lens(name="x", instructions="look for problems")
+    findings = run_lens(lens, Context(diff="+x", changed_files=[]), "m")
+    assert findings[0].line is None
 
 
 def test_curator_keeps_everything_on_count_mismatch(monkeypatch):

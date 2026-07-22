@@ -1,9 +1,15 @@
 # Writing a lens
 
 A lens is a markdown file describing one narrow reviewing angle. Argus ships
-four built-in lenses (`security`, `tests`, `error_handling`, `contracts`) in
+eight built-in lenses (`security`, `tests`, `error_handling`, `contracts`,
+`correctness`, `deleted_code`, `reuse`, `efficiency`) in
 `src/argus/lenses/builtin/`. Custom lenses work exactly the same way, just
 kept in your own repo.
+
+Before any lens runs, a planner reads the PR once and writes a short brief
+(intent, invariants, what to verify) that's injected into every lens's
+context — see [How it works in the README](../README.md#architecture).
+Your lens doesn't need to ask for that brief; it's already there.
 
 ## Format
 
