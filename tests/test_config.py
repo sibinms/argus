@@ -58,6 +58,25 @@ def test_example_config_parses(tmp_path):
     assert "security" in config.lenses
 
 
+def test_example_config_lists_all_builtin_lenses():
+    # Regression test: config.yml.example once pinned `lenses:` to an old
+    # 4-entry list, silently dropping the 4 newer lenses for anyone running
+    # `argus init` — load_config() only falls back to BUILTIN_LENSES when the
+    # key is absent, not when it's present-but-short, so this went unnoticed.
+    example = Path(__file__).parent.parent / ".argus" / "config.yml.example"
+    config = load_config(example)
+    assert set(config.lenses) == set(BUILTIN_LENSES)
+
+
+def test_dogfood_config_lists_all_builtin_lenses():
+    # Same regression as above, but for the config this repo actually runs
+    # against its own PRs — a stale list here means Argus reviews itself
+    # with fewer lenses than it ships to everyone else.
+    dogfood = Path(__file__).parent.parent / ".argus" / "config.yml"
+    config = load_config(dogfood)
+    assert set(config.lenses) == set(BUILTIN_LENSES)
+
+
 def test_correctness_in_builtin_lenses_and_default_config():
     assert "correctness" in BUILTIN_LENSES
     assert "correctness" in Config().lenses
