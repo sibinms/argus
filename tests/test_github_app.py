@@ -42,3 +42,21 @@ def test_get_installation_token_rejects_non_numeric_app_id(monkeypatch):
     monkeypatch.setattr("argus.github_app.GithubIntegration", MagicMock())
     with pytest.raises(ValueError, match="GITHUB_APP_ID must be numeric"):
         get_installation_token("not-a-number", "key", "owner/repo")
+
+
+def test_get_installation_token_propagates_github_exception(monkeypatch):
+    """get_installation_token must not swallow a GithubException from PyGithub
+    (e.g. the App isn't installed on this repo) — cli.py is what catches and
+    wraps it, so this function has to let it through unchanged."""
+    from github.GithubException import GithubException
+
+    integration = MagicMock()
+    integration.get_repo_installation.side_effect = GithubException(
+        404, {"message": "Not Found"}, None
+    )
+    monkeypatch.setattr(
+        "argus.github_app.GithubIntegration", lambda app_id, key, **kwargs: integration
+    )
+
+    with pytest.raises(GithubException):
+        get_installation_token("123", "key", "owner/repo")
