@@ -6,9 +6,11 @@ import shutil
 from pathlib import Path
 
 import click
+from github.GithubException import GithubException
 
 from argus.config import DEFAULT_CONFIG_PATH, load_config
 from argus.context.gather import gather_github, gather_local
+from argus.github_app import get_installation_token
 from argus.pipeline import run_review
 from argus.posting.github import post_to_github
 from argus.posting.shadow import write_shadow_report
@@ -102,9 +104,20 @@ def review(
                     "Couldn't detect repo/PR from the environment; pass --repo and --pr."
                 )
             repo, pr_number = detected
-        token = os.environ.get("GITHUB_TOKEN")
-        if not token:
-            raise click.ClickException("GITHUB_TOKEN is not set.")
+
+        app_id = os.environ.get("GITHUB_APP_ID")
+        app_private_key = os.environ.get("GITHUB_APP_PRIVATE_KEY")
+        if app_id and app_private_key:
+            try:
+                token = get_installation_token(app_id, app_private_key, repo)
+            except (ValueError, GithubException) as exc:
+                raise click.ClickException(f"GitHub App authentication failed: {exc}") from exc
+        else:
+            token = os.environ.get("GITHUB_TOKEN")
+            if not token:
+                raise click.ClickException(
+                    "Set GITHUB_TOKEN, or GITHUB_APP_ID + GITHUB_APP_PRIVATE_KEY for App auth."
+                )
         context = gather_github(repo, pr_number, token, config.context)
     else:
         context = gather_local(base, head, config.context)
