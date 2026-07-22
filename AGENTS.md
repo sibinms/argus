@@ -93,6 +93,9 @@ python eval/run_eval.py
   failure are fail-open by design. Provider exceptions from lens or curator
   requests currently propagate and fail the review; do not change either policy
   accidentally.
+- Make fail-open logs actionable: identify the failed stage or lens and retain
+  useful exception context, while never including credentials or other secret
+  values.
 - Do not broaden context collection casually. Narrow context limits are part of
   the product behavior, not just an optimization.
 
@@ -149,13 +152,7 @@ When editing lenses:
 ## Configuration Notes
 
 `Config` defaults live in `src/argus/config.py`; keep those aligned with
-`.argus/config.yml.example` and README examples. If you bump the package version
-in `pyproject.toml`, update `src/argus/__init__.py` and all README version
-references too, then run:
-
-```bash
-python scripts/check_readme_version.py
-```
+`.argus/config.yml.example` and README examples.
 
 This repo's `.argus/config.yml` intentionally uses Gemini flash models for
 dogfooding and ignores `eval/seed_bugs/*`, because those fixtures contain
@@ -165,13 +162,18 @@ intentional bugs.
 
 - Add focused unit tests for behavior changes in the corresponding `tests/`
   module.
-- For GitHub posting changes, cover idempotency, fingerprinting, 422 fallbacks,
-  verdict mapping, and commentability rules.
+- For GitHub posting changes, preserve the coverage in `tests/test_posting.py`
+  for idempotency, fingerprinting, verdict mapping, commentability, approval 422
+  fallback to a comment, inline-comment 422 retry without inline comments, and
+  propagation of non-422 errors.
 - For config changes, test missing config defaults, type validation, and override
   behavior.
 - For context changes, test both local diff behavior and ignore/budget logic.
-- For prompt/lens/curator changes, run the eval harness in addition to unit
-  tests.
+- For model parsing or curation changes, preserve the coverage in
+  `tests/test_client.py` that malformed lens output is logged and skipped and
+  malformed or mismatched curator output keeps every finding.
+- For prompt/lens/curator behavior changes, run the eval harness in addition to
+  unit tests.
 
 ## Common Tasks
 
@@ -188,7 +190,7 @@ intentional bugs.
   eval run and a note about any recall movement.
 - When releasing, update the version in `pyproject.toml`,
   `src/argus/__init__.py`, and every version-pinned README installation or
-  Action example together.
+  Action example together, then run `python scripts/check_readme_version.py`.
 
 ## Release And CI Notes
 
