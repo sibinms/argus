@@ -19,11 +19,14 @@ is set in .argus/config.yml, not hardcoded here.
 from __future__ import annotations
 
 import json
+import logging
 
 from litellm import completion
 
 from argus.context.gather import Context
 from argus.lenses.base import Finding, Lens
+
+logger = logging.getLogger(__name__)
 
 
 def _extract_json(text: str):
@@ -97,6 +100,10 @@ def generate_pr_summary(context: Context, model: str) -> str:
     try:
         return _complete(PLANNER_SYSTEM_PROMPT, user_prompt, model)
     except Exception:
+        # Lenses run fine without a brief, just with less shared context, so
+        # this shouldn't fail the whole review — but log it so a planner
+        # outage is visible instead of silently degrading review quality.
+        logger.warning("planner failed to generate a PR summary", exc_info=True)
         return ""
 
 
@@ -154,6 +161,10 @@ def run_lens(lens: Lens, context: Context, model: str) -> list[Finding]:
     try:
         raw_findings = _extract_json(text)
     except (json.JSONDecodeError, IndexError):
+        # A lens returning unparseable output looks identical to "found
+        # nothing" downstream, so at least log it — one lens failing
+        # shouldn't fail the whole review, but it shouldn't be invisible either.
+        logger.warning("lens %r returned unparseable output, skipping", lens.name)
         return []
 
     findings = []

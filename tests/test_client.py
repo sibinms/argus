@@ -99,6 +99,44 @@ def test_generate_pr_summary_returns_empty_on_error(monkeypatch):
     assert generate_pr_summary(ctx, "model") == ""
 
 
+def test_generate_pr_summary_preserves_the_documented_brief_sections(monkeypatch):
+    # PLANNER_SYSTEM_PROMPT asks the model for three named sections. This
+    # doesn't validate the model's compliance (that's on the model), but it
+    # does prove generate_pr_summary passes a compliant brief through intact
+    # rather than truncating or reformatting it.
+    brief = (
+        "## Intent\nAdds a feature.\n\n"
+        "## Key invariants\n- thing stays true\n\n"
+        "## What to verify\n- does X happen?"
+    )
+    monkeypatch.setattr("argus.models.client.completion", _fake_completion(brief))
+    ctx = Context(diff="+x", changed_files=[])
+    result = generate_pr_summary(ctx, "model")
+    assert "## Intent" in result
+    assert "## Key invariants" in result
+    assert "## What to verify" in result
+
+
+def test_generate_pr_summary_logs_warning_on_error(monkeypatch, caplog):
+    def boom(**kwargs):
+        raise RuntimeError("API down")
+
+    monkeypatch.setattr("argus.models.client.completion", boom)
+    ctx = Context(diff="+x", changed_files=[])
+    with caplog.at_level("WARNING"):
+        generate_pr_summary(ctx, "model")
+    assert "planner failed" in caplog.text
+
+
+def test_run_lens_logs_warning_on_unparseable_output(monkeypatch, caplog):
+    monkeypatch.setattr("argus.models.client.completion", _fake_completion("not json at all"))
+    lens = Lens(name="security", instructions="look for problems")
+    with caplog.at_level("WARNING"):
+        findings = run_lens(lens, Context(diff="+x", changed_files=[]), "m")
+    assert findings == []
+    assert "security" in caplog.text
+
+
 def test_coerce_line_accepts_int():
     assert _coerce_line(42) == 42
 
