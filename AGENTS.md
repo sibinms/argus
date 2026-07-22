@@ -93,9 +93,11 @@ python eval/run_eval.py
   failure are fail-open by design. Provider exceptions from lens or curator
   requests currently propagate and fail the review; do not change either policy
   accidentally.
-- Make fail-open logs actionable: identify the failed stage or lens and retain
-  useful exception context, while never including credentials or other secret
-  values.
+- Make every fail-open path, including GitHub thread resolution, emit an
+  actionable warning that identifies the failed stage or lens and retains useful
+  exception context, while never including credentials or other secret values.
+  A soft failure may leave the overall review successful, but must not be
+  reported as a successfully completed sub-operation.
 - Give every model-provider call, GitHub/API request, raw HTTP request, and
   subprocess invocation an explicit finite timeout so an unresponsive external
   dependency cannot stall the review indefinitely.
@@ -191,9 +193,11 @@ intentional bugs.
   objects in tests rather than calling the live API.
 - Change model prompts in `src/argus/models/client.py` or lens Markdown with an
   eval run and a note about any recall movement.
-- When releasing, update the version in `pyproject.toml`,
-  `src/argus/__init__.py`, and every version-pinned README installation or
-  Action example together, then run `python scripts/check_readme_version.py`.
+- Treat the version in `pyproject.toml` as the single source of truth. During a
+  release, update it first, then synchronize the legacy `src/argus/__init__.py`
+  value and every version-pinned README installation or Action example; do not
+  treat those mirrors as independent version sources. Finally, run
+  `python scripts/check_readme_version.py`.
 
 ## Release And CI Notes
 
