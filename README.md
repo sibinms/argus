@@ -105,7 +105,7 @@ the workflow, as shown below.
 **Anthropic**
 
 ``` yaml
-- uses: sibinms/argus@v1.2.23
+- uses: sibinms/argus@v1.2.24
   with:
     anthropic-api-key: ${{ secrets.ANTHROPIC_API_KEY }}
 ```
@@ -113,7 +113,7 @@ the workflow, as shown below.
 **OpenAI**
 
 ``` yaml
-- uses: sibinms/argus@v1.2.23
+- uses: sibinms/argus@v1.2.24
   env:
     OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
   with:
@@ -124,7 +124,7 @@ the workflow, as shown below.
 **Gemini**
 
 ``` yaml
-- uses: sibinms/argus@v1.2.23
+- uses: sibinms/argus@v1.2.24
   env:
     GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
   with:
@@ -135,7 +135,7 @@ the workflow, as shown below.
 **OpenRouter** — one key, hundreds of models across providers.
 
 ``` yaml
-- uses: sibinms/argus@v1.2.23
+- uses: sibinms/argus@v1.2.24
   env:
     OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
   with:
@@ -159,7 +159,7 @@ both are present, so a workflow-level pick always wins for a quick test.
 ### CLI
 
 ``` bash
-pip install "git+https://github.com/sibinms/argus.git@v1.2.23"
+pip install "git+https://github.com/sibinms/argus.git@v1.2.24"
 argus init
 
 export ANTHROPIC_API_KEY=...   # or OPENAI_API_KEY, GEMINI_API_KEY, ...
@@ -194,7 +194,7 @@ steps:
     args:
       - -c
       - |
-        pip install "git+https://github.com/sibinms/argus.git@v1.2.23"
+        pip install "git+https://github.com/sibinms/argus.git@v1.2.24"
         argus review \
           --github \
           --repo $$REPO_FULL_NAME \
@@ -211,6 +211,27 @@ Any other CI works the same way: the only GitHub Actions-specific bit
 is auto-detecting `--repo`/`--pr` from the Actions event payload, and
 every other CI already exposes its own equivalent build variables for
 that.
+
+**Posting as a bot, not a person.** A personal access token works, but
+every comment then shows up as posted by whoever owns that token — and
+if that person happens to also be the PR's author, GitHub rejects a
+`REQUEST_CHANGES`-style review outright (Argus falls back to a plain
+comment in that case, but a dedicated identity avoids the problem
+entirely). For a real bot identity, register a
+[GitHub App](https://docs.github.com/en/apps/creating-github-apps),
+grant it **Pull requests: read & write** and **Contents: read**, install
+it on your repos, and set two secrets instead of `GITHUB_TOKEN`:
+
+``` bash
+GITHUB_APP_ID=123456
+GITHUB_APP_PRIVATE_KEY="$(cat argus-app-private-key.pem)"
+```
+
+When both are set, `argus review --github` mints a short-lived
+installation access token itself (via PyGithub's `GithubIntegration`,
+already a dependency — no extra library needed) and posts under the
+App's identity; `GITHUB_TOKEN` is only used as a fallback when App
+credentials aren't present.
 
 ------------------------------------------------------------------------
 
