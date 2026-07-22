@@ -132,6 +132,22 @@ def _complete(system_prompt: str, user_prompt: str, model: str) -> str:
     return response.choices[0].message.content or ""
 
 
+def _coerce_line(value: object) -> int | None:
+    # Models sometimes return the line number as a numeric string
+    # (e.g. "42") instead of an int; normalize here so downstream code
+    # can rely on the Finding.line: int | None contract.
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value
+    if isinstance(value, str):
+        try:
+            return int(value.strip())
+        except ValueError:
+            return None
+    return None
+
+
 def run_lens(lens: Lens, context: Context, model: str) -> list[Finding]:
     text = _complete(lens.system_prompt(), _context_prompt(context), model)
 
@@ -148,7 +164,7 @@ def run_lens(lens: Lens, context: Context, model: str) -> list[Finding]:
             Finding(
                 lens=lens.name,
                 file=item.get("file"),
-                line=item.get("line"),
+                line=_coerce_line(item.get("line")),
                 summary=item["summary"],
                 detail=item.get("detail", ""),
                 confidence=item.get("confidence", "low"),

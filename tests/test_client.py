@@ -4,13 +4,14 @@ from unittest.mock import MagicMock
 import pytest
 
 from argus.context.gather import Context
-from argus.lenses.base import Finding
+from argus.lenses.base import Finding, Lens
 from argus.models.client import (
     _complete,
     _context_prompt,
     _extract_json,
     curate_with_model,
     generate_pr_summary,
+    run_lens,
 )
 
 
@@ -95,6 +96,30 @@ def test_generate_pr_summary_returns_empty_on_error(monkeypatch):
     monkeypatch.setattr("argus.models.client.completion", boom)
     ctx = Context(diff="+x", changed_files=[])
     assert generate_pr_summary(ctx, "model") == ""
+
+
+def test_run_lens_coerces_string_line_numbers_to_int(monkeypatch):
+    # Some models return "line" as a numeric string rather than an int. If it
+    # isn't coerced, Finding.line ends up a str, which later blows up the
+    # curator's dedupe distance check (int - str).
+    monkeypatch.setattr(
+        "argus.models.client.completion",
+        _fake_completion('[{"summary": "s", "line": "42"}]'),
+    )
+    lens = Lens(name="x", instructions="look for problems")
+    findings = run_lens(lens, Context(diff="+x", changed_files=[]), "m")
+    assert findings[0].line == 42
+    assert isinstance(findings[0].line, int)
+
+
+def test_run_lens_drops_unparseable_line_to_none(monkeypatch):
+    monkeypatch.setattr(
+        "argus.models.client.completion",
+        _fake_completion('[{"summary": "s", "line": "not-a-number"}]'),
+    )
+    lens = Lens(name="x", instructions="look for problems")
+    findings = run_lens(lens, Context(diff="+x", changed_files=[]), "m")
+    assert findings[0].line is None
 
 
 def test_curator_keeps_everything_on_count_mismatch(monkeypatch):
