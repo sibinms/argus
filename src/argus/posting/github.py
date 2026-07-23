@@ -191,8 +191,10 @@ def _resolve_addressed_threads(
             if match and match.group(1) in addressed_fps:
                 _graphql_resolve_thread(thread["id"], token)
     except Exception:
-        # Never let housekeeping break the run.
-        return
+        # Never let housekeeping break the run, but a persistent GraphQL
+        # failure here means threads silently pile up unresolved forever —
+        # worth a log, same as the other best-effort calls in this module.
+        logger.warning("failed to resolve addressed review threads", exc_info=True)
 
 
 def _graphql(query: str, variables: dict, token: str) -> dict:

@@ -100,6 +100,29 @@ def test_fingerprint_ignores_line_and_wording_drift():
     assert _fingerprint(_f("SQL injection risk")) != _fingerprint(_f("missing timeout"))
 
 
+def test_new_findings_sorted_returns_new_by_confidence_and_addressed_fps():
+    low = _f("low issue", confidence="low")
+    high = _f("high issue", confidence="high")
+    posted_fps = {_fingerprint(_f("stale issue"))}  # no longer in candidates -> addressed
+
+    new, addressed = ghmod._new_findings_sorted([low, high], posted_fps)
+
+    assert new == [high, low]  # highest confidence first
+    assert addressed == posted_fps
+
+
+def test_new_findings_sorted_excludes_already_posted():
+    f = _f("issue")
+    new, _ = ghmod._new_findings_sorted([f], {_fingerprint(f)})
+    assert new == []
+
+
+def test_new_findings_sorted_no_addressed_when_nothing_missing():
+    f = _f("issue")
+    _, addressed = ghmod._new_findings_sorted([f], {_fingerprint(f)})
+    assert addressed == set()
+
+
 def test_inline_comments_are_capped(monkeypatch):
     pr = _fake_pr([None])
     _patch_github(monkeypatch, pr)
@@ -339,13 +362,15 @@ def test_resolve_addressed_noop_when_nothing_addressed(monkeypatch):
     assert called == []  # no API call when there's nothing to resolve
 
 
-def test_resolve_addressed_swallows_api_errors(monkeypatch):
+def test_resolve_addressed_swallows_api_errors(monkeypatch, caplog):
     def boom(*args):
         raise RuntimeError("graphql down")
 
     monkeypatch.setattr(ghmod, "_graphql_review_threads", boom)
-    # best-effort housekeeping must never break the run
-    ghmod._resolve_addressed_threads("o/r", 1, "tok", {"aaaaaaaaaaaa"})
+    # best-effort housekeeping must never break the run, but must log
+    with caplog.at_level("WARNING"):
+        ghmod._resolve_addressed_threads("o/r", 1, "tok", {"aaaaaaaaaaaa"})
+    assert "failed to resolve addressed review threads" in caplog.text
 
 
 # ---- thread replies ----
@@ -382,13 +407,15 @@ def test_thread_replies_skips_threads_with_no_fingerprint_marker():
     assert ghmod.thread_replies_by_fingerprint(threads) == {}
 
 
-def test_fetch_thread_replies_swallows_errors(monkeypatch):
+def test_fetch_thread_replies_swallows_errors(monkeypatch, caplog):
     monkeypatch.setattr(
         ghmod,
         "_graphql_review_threads",
         lambda *a: (_ for _ in ()).throw(RuntimeError("down")),
     )
-    assert ghmod.fetch_thread_replies("o/r", 1, "tok") == {}
+    with caplog.at_level("WARNING"):
+        assert ghmod.fetch_thread_replies("o/r", 1, "tok") == {}
+    assert "failed to fetch review-thread replies" in caplog.text
 
 
 # ---- overflow comment ----
