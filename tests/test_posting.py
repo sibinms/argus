@@ -118,13 +118,17 @@ def test_finding_bumped_by_cap_lands_in_overflow_not_lost(monkeypatch):
     findings = [_f("issue one", line=1), _f("issue two", line=2)]
     _post(findings=findings, posting=PostingConfig(min_confidence="low", max_inline_comments=1))
 
-    # one finding posted inline...
+    # "issue one" fit under the cap and was posted inline...
     inline_posted = pr.create_review.call_args_list[0].kwargs["comments"]
     assert len(inline_posted) == 1
-    # ...the other isn't dropped, it surfaces in the overflow comment
+    assert "issue one" in inline_posted[0]["body"]
+    # ...while "issue two" was bumped, but isn't dropped: it surfaces in the
+    # overflow comment instead of vanishing.
     pr.create_issue_comment.assert_called_once()
     overflow_body = pr.create_issue_comment.call_args.args[0]
     assert "argus:overflow" in overflow_body
+    assert "issue two" in overflow_body
+    assert "issue one" not in overflow_body
 
 
 # ---- posting behaviour ----

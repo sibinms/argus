@@ -25,6 +25,7 @@ acts as a moderator instead:
 from __future__ import annotations
 
 import json
+import logging
 import re
 import urllib.request
 
@@ -38,6 +39,8 @@ from argus.curator.curate import recurate_with_replies
 from argus.fingerprint import fingerprint as _fingerprint
 from argus.lenses.base import Finding
 from argus.report import postable_findings, verdict
+
+logger = logging.getLogger(__name__)
 
 # "approve" is handled separately (see post_to_github): it becomes a real
 # APPROVE only when posting.approve_reviews is on, otherwise a positive
@@ -214,7 +217,7 @@ def _graphql_review_threads(repo_full_name: str, pr_number: int, token: str) -> 
             nodes{
               id
               isResolved
-              comments(first:20){ nodes{ body author{ login } } }
+              comments(first:100){ nodes{ body author{ login } } }
             }
           }
         }
@@ -270,11 +273,13 @@ def thread_replies_by_fingerprint(threads: list[dict]) -> dict[str, list[str]]:
 def fetch_thread_replies(repo_full_name: str, pr_number: int, token: str) -> dict[str, list[str]]:
     """Best-effort: replies keyed by finding fingerprint. Any failure returns
     no replies rather than breaking the run — reply-awareness is an
-    enhancement, not required for posting to work."""
+    enhancement, not required for posting to work — but still logs a
+    warning so a persistent GraphQL failure doesn't go unnoticed."""
     try:
         threads = _graphql_review_threads(repo_full_name, pr_number, token)
         return thread_replies_by_fingerprint(threads)
     except Exception:
+        logger.warning("failed to fetch review-thread replies", exc_info=True)
         return {}
 
 
@@ -341,7 +346,13 @@ def post_to_github(
     new_overflow = [f for f in overflow_candidates if _fingerprint(f) in overflow_new_fps]
     new_overflow.sort(key=lambda f: _CONFIDENCE_RANK.get(f.confidence, 0), reverse=True)
     if new_overflow:
-        pr.create_issue_comment(_overflow_comment_body(new_overflow))
+        try:
+            pr.create_issue_comment(_overflow_comment_body(new_overflow))
+        except GithubException:
+            # Non-fatal: an inline-postable finding this run, or the formal
+            # review below, still gets through. Log it rather than silently
+            # losing the overflow findings with no signal at all.
+            logger.warning("failed to post the overflow comment", exc_info=True)
 
     v = verdict(findings, posting)
     if v == "approve":
