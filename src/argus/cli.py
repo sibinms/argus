@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import shutil
 from pathlib import Path
@@ -41,6 +42,11 @@ def _detect_github_pr() -> tuple[str, int] | None:
 @click.group()
 def main():
     """Argus: an AI PR reviewer built from many narrow lenses and one careful curator."""
+    # Several best-effort operations (reply-awareness, thread resolution)
+    # only ever log on failure rather than raising — without a handler
+    # configured, those warnings go nowhere, and a silent failure becomes
+    # indistinguishable from nothing having gone wrong at all.
+    logging.basicConfig(level=logging.WARNING, format="%(levelname)s %(name)s: %(message)s")
 
 
 @main.command()
