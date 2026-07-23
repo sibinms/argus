@@ -92,6 +92,6 @@ jobs:
       - name: Run recall eval against seed bugs
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-          ARGUS_EVAL_LENS_MODEL: gemini/gemini-2.5-flash
-          ARGUS_EVAL_CURATOR_MODEL: gemini/gemini-2.5-flash
+          ARGUS_EVAL_LENS_MODEL: gemini/gemini-3.5-flash
+          ARGUS_EVAL_CURATOR_MODEL: gemini/gemini-3.5-flash
         run: python eval/run_eval.py
