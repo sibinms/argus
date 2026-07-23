@@ -8,11 +8,14 @@ GitHub Action against a real pull request.
 
 from __future__ import annotations
 
+import logging
 import subprocess  # nosec B404 - only used to shell out to git with a fixed argv list
 from dataclasses import dataclass, field
 
 from argus.config import ContextConfig
 from argus.context.budget import apply_budget, is_ignored
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -111,7 +114,13 @@ def gather_github(
     if since_sha:
         try:
             pr_files = list(repo.compare(since_sha, pr.head.sha).files)
-        except GithubException:
+        except Exception:
+            # Incremental diffing is an optimization on top of the core
+            # review, not the review itself — any failure here (a real API
+            # error, but also a network timeout, DNS failure, or other
+            # transient issue GithubException doesn't necessarily wrap)
+            # should fall back to the full diff, not crash the run.
+            logger.warning("failed to compare since_sha to head, falling back", exc_info=True)
             pr_files = None
     if pr_files is None:
         pr_files = list(pr.get_files())

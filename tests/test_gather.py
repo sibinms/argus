@@ -154,6 +154,7 @@ def test_gather_github_falls_back_to_full_diff_when_compare_fails(monkeypatch):
 
     ctx = gather_github("o/r", 1, "tok", ContextConfig(), since_sha="gone-sha")
 
+    pr.get_files.assert_called_once()
     assert ctx.changed_paths == ["a.py"]
     assert "full change" in ctx.diff
 
@@ -180,7 +181,38 @@ def test_gather_github_without_since_sha_uses_full_diff(monkeypatch):
     ctx = gather_github("o/r", 1, "tok", ContextConfig())
 
     repo.compare.assert_not_called()
+    pr.get_files.assert_called_once()
     assert ctx.changed_paths == ["a.py"]
+
+
+def test_gather_github_compare_swallows_non_github_errors(monkeypatch, caplog):
+    """A network-level failure (not a GithubException) comparing since_sha
+    to head must still fall back to the full diff, not crash the run --
+    incremental diffing is an optimization, not the review itself."""
+    changed = MagicMock()
+    changed.filename = "a.py"
+    changed.patch = "@@ -1 +1 @@\n+full change\n"
+
+    pr = MagicMock()
+    pr.title = "t"
+    pr.body = "b"
+    pr.head.sha = "headsha"
+    pr.get_files.return_value = [changed]
+
+    repo = MagicMock()
+    repo.get_pull.return_value = pr
+    repo.compare.side_effect = TimeoutError("connection timed out")
+    repo.get_contents.side_effect = GithubException(404, data={}, headers=None)
+
+    gh = MagicMock()
+    gh.get_repo.return_value = repo
+    monkeypatch.setattr(github, "Github", lambda *a, **k: gh)
+
+    with caplog.at_level("WARNING"):
+        ctx = gather_github("o/r", 1, "tok", ContextConfig(), since_sha="oldsha")
+
+    assert ctx.changed_paths == ["a.py"]
+    assert "failed to compare since_sha to head" in caplog.text
 
 
 def test_gather_github_changed_paths_excludes_ignored_files(monkeypatch):
