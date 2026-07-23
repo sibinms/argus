@@ -15,6 +15,8 @@ Two kinds of drop, deliberately treated differently:
 
 from __future__ import annotations
 
+from dataclasses import replace
+
 from argus.context.gather import Context
 from argus.curator.evidence import quote_appears_in_context
 from argus.fingerprint import fingerprint as _fingerprint
@@ -121,14 +123,24 @@ def recurate_with_replies(
     if not targets:
         return findings
 
+    # Fold the reply into a *copy*'s detail for the curator call only —
+    # finding.detail is rendered verbatim in the posted comment, so mutating
+    # the original would echo the human's own reply back at them if the
+    # finding is kept or downgraded rather than dropped.
+    augmented = []
     for f in targets:
         reply_text = "\n\n".join(replies[_fingerprint(f)])
-        f.detail = (
-            f"{f.detail}\n\n---\nReply on this finding's thread (from someone other "
-            f"than Argus, on a previous review round):\n{reply_text}"
+        augmented.append(
+            replace(
+                f,
+                detail=(
+                    f"{f.detail}\n\n---\nReply on this finding's thread (from someone other "
+                    f"than Argus, on a previous review round):\n{reply_text}"
+                ),
+            )
         )
 
-    decisions = curate_with_model(targets, context, model)
+    decisions = curate_with_model(augmented, context, model)
     for finding, decision in zip(targets, decisions):
         _apply_decision(finding, decision, context)
 

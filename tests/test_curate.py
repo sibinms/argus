@@ -98,9 +98,14 @@ def test_recurate_with_replies_folds_reply_into_detail_and_reapplies_decision(mo
 
     out = recurate_with_replies([f], {fp: ["this is intentional, see ENG-123"]}, _ctx(), "m")
 
+    # the curator saw the reply...
     assert "this is intentional, see ENG-123" in captured["detail"]
     assert out[0].status == "dropped"
     assert out[0].drop_reason == "author explained it's intentional"
+    # ...but the finding's own detail — rendered verbatim in the posted
+    # comment when kept/downgraded — is never mutated with it.
+    assert out[0].detail == "d"
+    assert "ENG-123" not in out[0].detail
 
 
 def test_recurate_with_replies_still_requires_a_real_quote_for_drop(monkeypatch):

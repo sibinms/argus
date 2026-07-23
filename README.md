@@ -354,7 +354,9 @@ Everything runs:
 -   in your GitHub Action
 -   or on your local machine
 
-Your chosen LLM provider receives only the context required for review.
+Your chosen LLM provider receives only the context required for review —
+this now includes replies left on a finding's thread, since the curator
+reads them to decide whether a finding still stands.
 
 ------------------------------------------------------------------------
 
