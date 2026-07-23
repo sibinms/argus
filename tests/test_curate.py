@@ -108,6 +108,26 @@ def test_recurate_with_replies_folds_reply_into_detail_and_reapplies_decision(mo
     assert "ENG-123" not in out[0].detail
 
 
+def test_recurate_with_replies_degrades_gracefully_on_curator_failure(monkeypatch, caplog):
+    # A transient failure re-judging the reply shouldn't abort the whole
+    # run — the original finding (unmodified) should still come back.
+    f = _finding()
+    fp = fingerprint(f)
+
+    def boom(findings, ctx, model):
+        raise RuntimeError("curator API down")
+
+    module = sys.modules["argus.curator.curate"]
+    monkeypatch.setattr(module, "curate_with_model", boom)
+
+    with caplog.at_level("WARNING"):
+        out = recurate_with_replies([f], {fp: ["a reply"]}, _ctx(), "m")
+
+    assert out[0] is f
+    assert out[0].status == "proposed"  # untouched, not re-judged
+    assert "failed to re-curate findings with replies" in caplog.text
+
+
 def test_recurate_with_replies_still_requires_a_real_quote_for_drop(monkeypatch):
     # A reply can't unilaterally prove a finding wrong the way a diff quote
     # can — "drop" via a reply with no real evidence_quote must still refuse

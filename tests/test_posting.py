@@ -7,12 +7,7 @@ from argus.config import PostingConfig
 from argus.context.gather import Context
 from argus.lenses.base import Finding
 from argus.posting import github as ghmod
-from argus.posting.github import (
-    _fingerprint,
-    _patch_new_lines,
-    commentable_lines,
-    partition_findings,
-)
+from argus.posting.github import _fingerprint, _patch_new_lines, commentable_lines
 
 
 def _ctx() -> Context:
@@ -71,12 +66,6 @@ def _post(pr_or_none_findings=None, findings=None, posting=None, **kwargs):
 # ---- pure logic ----
 
 
-def test_partition_splits_new_and_addressed():
-    new, addressed = partition_findings({"a", "b"}, {"b", "c"})
-    assert new == {"a"}
-    assert addressed == {"c"}
-
-
 def _f(summary: str, line: int = 1, confidence: str = "high") -> Finding:
     return Finding(
         lens="tests",
@@ -100,27 +89,20 @@ def test_fingerprint_ignores_line_and_wording_drift():
     assert _fingerprint(_f("SQL injection risk")) != _fingerprint(_f("missing timeout"))
 
 
-def test_new_findings_sorted_returns_new_by_confidence_and_addressed_fps():
+def test_new_findings_sorted_returns_new_by_confidence():
     low = _f("low issue", confidence="low")
     high = _f("high issue", confidence="high")
-    posted_fps = {_fingerprint(_f("stale issue"))}  # no longer in candidates -> addressed
+    posted_fps = {_fingerprint(_f("unrelated stale issue"))}  # doesn't affect these two
 
-    new, addressed = ghmod._new_findings_sorted([low, high], posted_fps)
+    new = ghmod._new_findings_sorted([low, high], posted_fps)
 
     assert new == [high, low]  # highest confidence first
-    assert addressed == posted_fps
 
 
 def test_new_findings_sorted_excludes_already_posted():
     f = _f("issue")
-    new, _ = ghmod._new_findings_sorted([f], {_fingerprint(f)})
+    new = ghmod._new_findings_sorted([f], {_fingerprint(f)})
     assert new == []
-
-
-def test_new_findings_sorted_no_addressed_when_nothing_missing():
-    f = _f("issue")
-    _, addressed = ghmod._new_findings_sorted([f], {_fingerprint(f)})
-    assert addressed == set()
 
 
 def test_inline_comments_are_capped(monkeypatch):
@@ -203,6 +185,26 @@ def test_finding_already_posted_inline_is_not_duplicated_to_overflow(monkeypatch
     _post(findings=[orphaned])
 
     pr.create_issue_comment.assert_not_called()
+
+
+def test_finding_relocated_to_overflow_does_not_resolve_its_inline_thread(monkeypatch):
+    """A finding still being raised — just no longer on an anchorable line —
+    is not "addressed". Its old inline thread must stay open, not get
+    resolved as if the underlying issue were fixed."""
+    f = _finding(2)
+    existing = MagicMock()
+    existing.body = f"<!-- argus:fp:{_fingerprint(f)} -->\npreviously posted"
+    pr = _fake_pr(posted_comments=[existing])
+    _patch_github(monkeypatch, pr)
+    resolved: list[str] = []
+    monkeypatch.setattr(ghmod, "_graphql_resolve_thread", lambda tid, tok: resolved.append(tid))
+
+    orphaned = _finding(999)  # same issue, now off-diff -> overflow, not gone
+    orphaned.summary = f.summary
+
+    _post(findings=[orphaned])
+
+    assert resolved == []  # still current (in overflow) -> thread stays open
 
 
 def test_finding_on_non_diff_line_goes_to_overflow_comment(monkeypatch):

@@ -15,6 +15,7 @@ Two kinds of drop, deliberately treated differently:
 
 from __future__ import annotations
 
+import logging
 from dataclasses import replace
 
 from argus.context.gather import Context
@@ -22,6 +23,8 @@ from argus.curator.evidence import quote_appears_in_context
 from argus.fingerprint import fingerprint as _fingerprint
 from argus.lenses.base import Finding
 from argus.models.client import curate_with_model
+
+logger = logging.getLogger(__name__)
 
 _CONFIDENCE_RANK = {"low": 0, "medium": 1, "high": 2}
 
@@ -140,7 +143,15 @@ def recurate_with_replies(
             )
         )
 
-    decisions = curate_with_model(augmented, context, model)
+    # Reply-awareness is an enhancement on top of the core review, not the
+    # review itself — a transient failure re-judging a handful of findings
+    # shouldn't abort posting the rest of an otherwise-successful run.
+    try:
+        decisions = curate_with_model(augmented, context, model)
+    except Exception:
+        logger.warning("failed to re-curate findings with replies", exc_info=True)
+        return findings
+
     for finding, decision in zip(targets, decisions):
         _apply_decision(finding, decision, context)
 

@@ -70,14 +70,6 @@ def _comment_body(f: Finding) -> str:
     return f"{marker}\n**{f.summary}** *(lens: {f.lens}, confidence: {f.confidence})*\n\n{f.detail}"
 
 
-def partition_findings(current_fps: set[str], posted_fps: set[str]) -> tuple[set[str], set[str]]:
-    """Split fingerprints into (new, addressed): new findings not yet posted,
-    and previously-posted findings that are no longer raised."""
-    new = current_fps - posted_fps
-    addressed = posted_fps - current_fps
-    return new, addressed
-
-
 def _patch_new_lines(patch: str | None) -> set[int]:
     """The new-file line numbers a patch touches (added + context lines) —
     exactly the lines GitHub will accept an inline comment on."""
@@ -134,6 +126,13 @@ def _posted_overflow_fingerprints(pr) -> set[str]:
 
 
 def _overflow_comment_body(findings: list[Finding]) -> str:
+    # Known limitation: unlike inline threads (which get resolved once a
+    # finding is addressed), an overflow comment is never edited after
+    # posting — a finding that's since fixed just stays listed here. Fixing
+    # this properly means either editing the comment in place (reintroducing
+    # the "invisible update" problem the old rolling summary had) or some
+    # new per-finding resolution affordance; punting on both for now since
+    # overflow only covers the minority of findings that can't be inlined.
     lines = [
         _OVERFLOW_MARKER,
         "**Argus** — finding(s) that don't attach to a changed line:",
@@ -283,18 +282,17 @@ def _fetch_review_threads(repo_full_name: str, pr_number: int, token: str) -> li
         return []
 
 
-def _new_findings_sorted(
-    candidates: list[Finding], posted_fps: set[str]
-) -> tuple[list[Finding], set[str]]:
-    """New findings from `candidates` (not already posted, keyed by
-    fingerprint), sorted highest-confidence first — plus the fingerprints
-    no longer present in `candidates` (addressed since the last run). Shared
-    between inline and overflow, which otherwise repeat this exact pattern."""
+def _new_findings_sorted(candidates: list[Finding], posted_fps: set[str]) -> list[Finding]:
+    """Findings from `candidates` not already posted (by fingerprint,
+    checked against `posted_fps` — pass the union of inline- and
+    overflow-posted fingerprints so a finding already surfaced on one
+    surface is never posted again on the other), sorted highest-confidence
+    first."""
     current_fps = {_fingerprint(f) for f in candidates}
-    new_fps, addressed_fps = partition_findings(current_fps, posted_fps)
+    new_fps = current_fps - posted_fps
     new = [f for f in candidates if _fingerprint(f) in new_fps]
     new.sort(key=lambda f: _CONFIDENCE_RANK.get(f.confidence, 0), reverse=True)
-    return new, addressed_fps
+    return new
 
 
 def post_to_github(
@@ -332,8 +330,25 @@ def post_to_github(
         else:
             overflow_findings.append(f)
 
+    # Fingerprints already posted on *either* surface. A finding can move
+    # between surfaces across runs (a line becomes un-anchorable after a
+    # force-push, or the reverse), so both "new" checks below use this same
+    # union — otherwise a finding posted on one surface could be posted
+    # again on the other.
     posted_fps = _posted_fingerprints(pr)
-    new_inline, addressed_fps = _new_findings_sorted(inline_findings, posted_fps)
+    overflow_posted_fps = _posted_overflow_fingerprints(pr)
+    all_posted_fps = posted_fps | overflow_posted_fps
+
+    # A previously-inline finding only counts as "addressed" (safe to
+    # resolve its thread) if it's absent from *both* surfaces this run —
+    # not just no longer inline, since it may have simply relocated to
+    # overflow rather than actually being fixed.
+    all_current_fps = {_fingerprint(f) for f in inline_findings} | {
+        _fingerprint(f) for f in overflow_findings
+    }
+    addressed_fps = posted_fps - all_current_fps
+
+    new_inline = _new_findings_sorted(inline_findings, all_posted_fps)
 
     # Limited by the hard lifetime cap. Once the PR already carries
     # max_inline_comments Argus comments, no more are posted inline. This is
@@ -352,13 +367,8 @@ def post_to_github(
     # Findings that can't attach to a diff line — or that could, but didn't
     # fit under the inline cap — get the same new-vs-already-posted
     # treatment via a small standalone comment instead of an inline thread.
-    # Excludes anything already posted *inline* too (posted_fps), not just
-    # anything already in the overflow comment — otherwise a finding whose
-    # line becomes un-anchorable across runs (e.g. after a force-push) would
-    # get posted a second time here despite already having an inline thread.
     overflow_candidates = overflow_findings + bumped_by_cap
-    overflow_posted_fps = _posted_overflow_fingerprints(pr) | posted_fps
-    new_overflow, _ = _new_findings_sorted(overflow_candidates, overflow_posted_fps)
+    new_overflow = _new_findings_sorted(overflow_candidates, all_posted_fps)
 
     v = verdict(findings, posting)
     if v == "approve":
