@@ -10,8 +10,8 @@ from argus.posting import github as ghmod
 from argus.posting.github import _fingerprint, _patch_new_lines, commentable_lines
 
 
-def _ctx() -> Context:
-    return Context(diff="+x", changed_files=[])
+def _ctx(changed_paths=None) -> Context:
+    return Context(diff="+x", changed_files=[], changed_paths=changed_paths or ["a.py"])
 
 
 def _finding(line: int) -> Finding:
@@ -207,6 +207,60 @@ def test_finding_relocated_to_overflow_does_not_resolve_its_inline_thread(monkey
     assert resolved == []  # still current (in overflow) -> thread stays open
 
 
+def test_addressed_finding_resolves_when_its_file_was_touched_this_run(monkeypatch):
+    """A finding no longer raised, whose file WAS in this run's diff scope,
+    is genuinely fixed -- its thread should resolve."""
+    f = _finding(2)
+    fp = _fingerprint(f)
+    existing = MagicMock()
+    existing.body = f"<!-- argus:fp:{fp} -->\npreviously posted"
+    existing.path = "a.py"
+    pr = _fake_pr(posted_comments=[existing])
+    _patch_github(monkeypatch, pr)
+    monkeypatch.setattr(
+        ghmod,
+        "_fetch_review_threads",
+        lambda *a, **k: [
+            {"id": "T1", "isResolved": False, "firstBody": existing.body, "comments": []}
+        ],
+    )
+    resolved: list[str] = []
+    monkeypatch.setattr(ghmod, "_graphql_resolve_thread", lambda tid, tok: resolved.append(tid))
+
+    # default _ctx() has changed_paths=["a.py"] -- in scope this run, and the
+    # finding is simply absent from the (empty) findings list -> fixed.
+    _post(findings=[])
+
+    assert resolved == ["T1"]
+
+
+def test_addressed_finding_does_not_resolve_when_its_file_was_untouched_this_run(monkeypatch):
+    """A finding absent from this run's results doesn't mean it's fixed if
+    this run's diff scope never even looked at its file -- e.g. an
+    incremental re-review that only covers the latest push. Its thread must
+    stay open rather than being wrongly marked addressed."""
+    f = _finding(2)
+    fp = _fingerprint(f)
+    existing = MagicMock()
+    existing.body = f"<!-- argus:fp:{fp} -->\npreviously posted"
+    existing.path = "b.py"  # not touched this run
+    pr = _fake_pr(posted_comments=[existing])
+    _patch_github(monkeypatch, pr)
+    monkeypatch.setattr(
+        ghmod,
+        "_fetch_review_threads",
+        lambda *a, **k: [
+            {"id": "T1", "isResolved": False, "firstBody": existing.body, "comments": []}
+        ],
+    )
+    resolved: list[str] = []
+    monkeypatch.setattr(ghmod, "_graphql_resolve_thread", lambda tid, tok: resolved.append(tid))
+
+    _post(findings=[], context=_ctx(changed_paths=["a.py"]))  # b.py out of scope
+
+    assert resolved == []
+
+
 def test_finding_on_non_diff_line_goes_to_overflow_comment(monkeypatch):
     pr = _fake_pr([None])
     _patch_github(monkeypatch, pr)
@@ -352,19 +406,177 @@ def test_reply_on_still_flagged_finding_triggers_recuration(monkeypatch):
     monkeypatch.setattr(ghmod, "_graphql_resolve_thread", lambda tid, tok: resolved.append(tid))
 
     captured = {}
-    monkeypatch.setattr(
-        ghmod,
-        "recurate_with_replies",
-        lambda findings, replies, ctx, model: (
-            captured.update(replies=replies, findings=findings) or []
-        ),  # curator drops it entirely -> nothing left to post
-    )
+
+    def fake_recurate(findings, replies, ctx, model):
+        captured.update(replies=replies, findings=findings)
+        # Real recurate_with_replies mutates matching findings in place
+        # (status/confidence/drop_reason) and never shrinks the list --
+        # simulate the curator dropping it via that same contract.
+        for finding in findings:
+            if _fingerprint(finding) in replies:
+                finding.status = "dropped"
+        return findings
+
+    monkeypatch.setattr(ghmod, "recurate_with_replies", fake_recurate)
 
     _post(findings=[f])
 
     assert captured["replies"] == {fp: ["intentional, see X"]}
     # dropped by recuration, verdict unchanged from last review -> stays quiet
     pr.create_review.assert_not_called()
+
+
+def test_reply_on_stale_finding_not_rediscovered_this_run_still_gets_recurated(monkeypatch):
+    """Under incremental review, a finding's file may not be in this run's
+    diff scope even though a fresh reply just landed on its thread -- it
+    must still be reconstructed from its own posted comment and re-judged,
+    not silently ignored just because this run's fresh findings list is
+    empty (or simply doesn't happen to include it)."""
+    f = _finding(2)
+    fp = _fingerprint(f)
+    existing = MagicMock()
+    existing.body = ghmod._comment_body(f)
+    existing.path = "a.py"
+    existing.line = 2
+    pr = _fake_pr(posted_comments=[existing])
+    _patch_github(monkeypatch, pr)
+    monkeypatch.setattr(
+        ghmod,
+        "_fetch_review_threads",
+        lambda *a, **k: [
+            {"id": "T1", "isResolved": False, "firstBody": existing.body, "comments": []}
+        ],
+    )
+    monkeypatch.setattr(
+        ghmod, "thread_replies_by_fingerprint", lambda threads: {fp: ["fixed now, see commit X"]}
+    )
+    resolved: list[str] = []
+    monkeypatch.setattr(ghmod, "_graphql_resolve_thread", lambda tid, tok: resolved.append(tid))
+
+    captured = {}
+
+    def fake_recurate(findings, replies, ctx, model):
+        captured["fingerprints"] = {ghmod._fingerprint(x) for x in findings}
+        for finding in findings:
+            if ghmod._fingerprint(finding) in replies:
+                finding.status = "dropped"
+        return findings
+
+    monkeypatch.setattr(ghmod, "recurate_with_replies", fake_recurate)
+
+    # This run's fresh findings are empty (e.g. incremental diff saw
+    # nothing new) and its diff scope doesn't include "a.py" -- neither
+    # should stop the reply from being picked up and acted on.
+    _post(findings=[], context=_ctx(changed_paths=["unrelated.py"]))
+
+    assert fp in captured["fingerprints"]  # reconstructed and handed to recuration
+    assert resolved == ["T1"]  # dropped via reply -> resolved despite a.py not being touched
+
+
+def test_reply_on_stale_finding_kept_after_recuration_does_not_resolve_its_thread(monkeypatch):
+    """A reply doesn't unilaterally win -- if the curator still keeps a
+    reconstructed stale finding after considering the reply, its thread
+    must stay open, not get resolved just because it was reconstructed."""
+    f = _finding(2)
+    fp = _fingerprint(f)
+    existing = MagicMock()
+    existing.body = ghmod._comment_body(f)
+    existing.path = "a.py"
+    existing.line = 2
+    pr = _fake_pr(posted_comments=[existing])
+    _patch_github(monkeypatch, pr)
+    monkeypatch.setattr(
+        ghmod,
+        "_fetch_review_threads",
+        lambda *a, **k: [
+            {"id": "T1", "isResolved": False, "firstBody": existing.body, "comments": []}
+        ],
+    )
+    monkeypatch.setattr(
+        ghmod, "thread_replies_by_fingerprint", lambda threads: {fp: ["not convincing"]}
+    )
+    resolved: list[str] = []
+    monkeypatch.setattr(ghmod, "_graphql_resolve_thread", lambda tid, tok: resolved.append(tid))
+    # Curator considers the reply but keeps the finding -- status unchanged.
+    monkeypatch.setattr(
+        ghmod, "recurate_with_replies", lambda findings, replies, ctx, model: findings
+    )
+
+    _post(findings=[], context=_ctx(changed_paths=["unrelated.py"]))
+
+    assert resolved == []
+
+
+def test_reply_on_fingerprint_with_no_posted_comment_does_not_raise(monkeypatch):
+    """A reply's fingerprint should always match an already-posted comment
+    in practice -- but if it somehow doesn't, reconstruction must be
+    skipped rather than raising."""
+    pr = _fake_pr([None])
+    _patch_github(monkeypatch, pr)
+    monkeypatch.setattr(
+        ghmod, "thread_replies_by_fingerprint", lambda threads: {"deadbeefdead": ["a reply"]}
+    )
+
+    _post(findings=[])  # should not raise
+
+
+def test_reconstruct_finding_parses_posted_comment_body():
+    f = _finding(2)
+    comment = MagicMock()
+    comment.body = ghmod._comment_body(f)
+    comment.path = "a.py"
+    comment.line = 2
+
+    reconstructed = ghmod._reconstruct_finding(comment)
+
+    assert reconstructed is not None
+    assert reconstructed.file == "a.py"
+    assert reconstructed.line == 2
+    assert reconstructed.lens == f.lens
+    assert reconstructed.confidence == f.confidence
+    assert reconstructed.summary == f.summary
+    assert reconstructed.detail == f.detail
+    assert reconstructed.status == "kept"
+
+
+def test_reconstruct_finding_returns_none_for_unparseable_body():
+    comment = MagicMock()
+    comment.body = "<!-- argus:fp:aaaaaaaaaaaa -->\nnot in the expected format at all"
+    comment.path = "a.py"
+    comment.line = 1
+
+    assert ghmod._reconstruct_finding(comment) is None
+
+
+def test_reconstruct_finding_handles_summary_with_asterisks_and_parens():
+    f = _finding(2)
+    f.summary = "Uses **bold** markdown and a (parenthetical) aside"
+    comment = MagicMock()
+    comment.body = ghmod._comment_body(f)
+    comment.path = "a.py"
+    comment.line = 2
+
+    reconstructed = ghmod._reconstruct_finding(comment)
+
+    assert reconstructed is not None
+    assert reconstructed.summary == f.summary
+    assert reconstructed.lens == f.lens
+    assert reconstructed.confidence == f.confidence
+
+
+def test_reconstruct_finding_rejects_trailing_text_after_header():
+    """The $ anchor exists specifically to reject a header line with
+    unexpected trailing content after the confidence parenthetical --
+    without it, a regression could silently accept malformed input."""
+    comment = MagicMock()
+    comment.body = (
+        "<!-- argus:fp:aaaaaaaaaaaa -->\n"
+        "**a summary** *(lens: tests, confidence: high)* extra trailing text\n\ndetail"
+    )
+    comment.path = "a.py"
+    comment.line = 1
+
+    assert ghmod._reconstruct_finding(comment) is None
 
 
 def test_recuration_skipped_when_no_replies(monkeypatch):
@@ -420,6 +632,76 @@ def test_resolve_addressed_swallows_api_errors(monkeypatch, caplog):
     with caplog.at_level("WARNING"):
         ghmod._resolve_addressed_threads(threads, "tok", {"aaaaaaaaaaaa"})
     assert "failed to resolve addressed review threads" in caplog.text
+
+
+# ---- last reviewed sha ----
+
+
+def _reviews_pr(reviews):
+    pr = MagicMock()
+    pr.get_reviews.return_value = reviews
+    return pr
+
+
+def test_last_reviewed_sha_reads_marker_from_most_recent_argus_review(monkeypatch):
+    older = MagicMock()
+    older.body = f"❌ **Argus** — changes requested\n\n<!-- argus:reviewed-sha:{'a' * 40} -->"
+    newer = MagicMock()
+    newer.body = f"✅ **Argus** — looks good\n\n<!-- argus:reviewed-sha:{'b' * 40} -->"
+    pr = _reviews_pr([older, newer])
+    repo = MagicMock()
+    repo.get_pull.return_value = pr
+    gh = MagicMock()
+    gh.get_repo.return_value = repo
+    monkeypatch.setattr(ghmod, "Github", lambda *a, **k: gh)
+
+    assert ghmod.last_reviewed_sha("o/r", 1, "tok") == "b" * 40
+
+
+def test_last_reviewed_sha_ignores_non_argus_reviews(monkeypatch):
+    human = MagicMock()
+    human.body = f"looks fine to me <!-- argus:reviewed-sha:{'a' * 40} -->"
+    pr = _reviews_pr([human])
+    repo = MagicMock()
+    repo.get_pull.return_value = pr
+    gh = MagicMock()
+    gh.get_repo.return_value = repo
+    monkeypatch.setattr(ghmod, "Github", lambda *a, **k: gh)
+
+    assert ghmod.last_reviewed_sha("o/r", 1, "tok") is None
+
+
+def test_last_reviewed_sha_returns_none_when_no_reviews(monkeypatch):
+    pr = _reviews_pr([])
+    repo = MagicMock()
+    repo.get_pull.return_value = pr
+    gh = MagicMock()
+    gh.get_repo.return_value = repo
+    monkeypatch.setattr(ghmod, "Github", lambda *a, **k: gh)
+
+    assert ghmod.last_reviewed_sha("o/r", 1, "tok") is None
+
+
+def test_last_reviewed_sha_swallows_errors(monkeypatch, caplog):
+    def boom(*a, **k):
+        raise RuntimeError("down")
+
+    monkeypatch.setattr(ghmod, "Github", boom)
+
+    with caplog.at_level("WARNING"):
+        assert ghmod.last_reviewed_sha("o/r", 1, "tok") is None
+    assert "failed to read last-reviewed SHA" in caplog.text
+
+
+def test_post_to_github_stamps_reviewed_sha_into_the_review_body(monkeypatch):
+    pr = _fake_pr([None])
+    pr.head.sha = "d" * 40
+    _patch_github(monkeypatch, pr)
+
+    _post(findings=[_finding(2)])
+
+    body = pr.create_review.call_args_list[0].kwargs["body"]
+    assert f"<!-- argus:reviewed-sha:{'d' * 40} -->" in body
 
 
 # ---- thread replies ----
