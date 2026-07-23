@@ -97,6 +97,63 @@ def test_gather_github_excludes_ignored_files_from_the_diff_itself(monkeypatch):
     assert "lockfile noise" not in ctx.diff
 
 
+def test_gather_github_does_not_fetch_content_for_ignored_files(monkeypatch):
+    """apply_budget drops ignored files from changed_files entirely, so
+    fetching their content is a wasted API call -- it must be skipped, not
+    fetched then discarded."""
+    kept = MagicMock()
+    kept.filename = "app.py"
+    kept.patch = "@@ -1 +1 @@\n+real change\n"
+    ignored = MagicMock()
+    ignored.filename = "yarn.lock"
+    ignored.patch = "@@ -1 +1 @@\n+lockfile noise\n"
+
+    pr = MagicMock()
+    pr.title = "t"
+    pr.body = "b"
+    pr.head.sha = "s"
+    pr.get_files.return_value = [kept, ignored]
+    repo = MagicMock()
+    repo.get_pull.return_value = pr
+    repo.get_contents.side_effect = GithubException(404, data={}, headers=None)
+    gh = MagicMock()
+    gh.get_repo.return_value = repo
+    monkeypatch.setattr(github, "Github", lambda *a, **k: gh)
+
+    gather_github("o/r", 1, "tok", ContextConfig(ignore_globs=["yarn.lock"]))
+
+    fetched_paths = [call.args[0] for call in repo.get_contents.call_args_list]
+    assert fetched_paths == ["app.py"]
+
+
+def test_gather_github_since_sha_with_no_changes_yields_empty_context(monkeypatch):
+    """since_sha valid but repo.compare returns no files (e.g. re-invoking
+    Argus with no new commits since the last review) should produce an
+    empty, not-erroring Context, not fall back to the full diff."""
+    pr = MagicMock()
+    pr.title = "t"
+    pr.body = "b"
+    pr.head.sha = "headsha"
+    pr.get_files.return_value = [MagicMock(filename="full-diff-only.py", patch="+full")]
+
+    comparison = MagicMock()
+    comparison.files = []
+    repo = MagicMock()
+    repo.get_pull.return_value = pr
+    repo.compare.return_value = comparison
+
+    gh = MagicMock()
+    gh.get_repo.return_value = repo
+    monkeypatch.setattr(github, "Github", lambda *a, **k: gh)
+
+    ctx = gather_github("o/r", 1, "tok", ContextConfig(), since_sha="samesha")
+
+    assert ctx.diff == ""
+    assert ctx.changed_files == []
+    assert ctx.changed_paths == []
+    pr.get_files.assert_not_called()
+
+
 def test_gather_github_scopes_to_since_sha_when_given(monkeypatch):
     """With since_sha, the diff should come from repo.compare(since_sha,
     head) instead of the PR's full base...head diff."""

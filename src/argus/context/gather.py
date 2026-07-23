@@ -128,8 +128,12 @@ def gather_github(
     diff_parts = []
     files = []
     for pr_file in pr_files:
-        if not is_ignored(pr_file.filename, config.ignore_globs):
-            diff_parts.append(pr_file.patch or "")
+        # apply_budget drops ignored files from `files` entirely, so fetching
+        # their content is a wasted API call — skip it up front instead of
+        # fetching then throwing it away.
+        if is_ignored(pr_file.filename, config.ignore_globs):
+            continue
+        diff_parts.append(pr_file.patch or "")
         content = None
         try:
             blob = repo.get_contents(pr_file.filename, ref=pr.head.sha)
@@ -145,12 +149,9 @@ def gather_github(
     # As in gather_local: changed_paths is "what a lens actually saw", so it
     # excludes ignored files -- their patch is never in `diff`, and counting
     # them as touched would let posting wrongly resolve a still-open finding
-    # on a file the lens was never shown this run.
-    changed_paths = [
-        pr_file.filename
-        for pr_file in pr_files
-        if not is_ignored(pr_file.filename, config.ignore_globs)
-    ]
+    # on a file the lens was never shown this run. Read off `files` (already
+    # ignore-filtered above) before apply_budget trims it to max_files.
+    changed_paths = [f.path for f in files]
     files = apply_budget(files, config)
 
     return Context(
