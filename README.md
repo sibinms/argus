@@ -128,8 +128,8 @@ the workflow, as shown below.
   env:
     GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
   with:
-    lens-model: gemini/gemini-2.5-flash
-    curator-model: gemini/gemini-2.5-pro
+    lens-model: gemini/gemini-3.5-flash
+    curator-model: gemini/gemini-3.1-pro-preview
 ```
 
 **OpenRouter** — one key, hundreds of models across providers.

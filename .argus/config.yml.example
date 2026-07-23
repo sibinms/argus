@@ -14,8 +14,8 @@ models:
   curator: claude-opus-4-8     # expensive, precise — can only drop a finding by citing evidence
   # lens: gpt-4o-mini
   # curator: gpt-4o
-  # lens: gemini/gemini-1.5-flash
-  # curator: gemini/gemini-1.5-pro
+  # lens: gemini/gemini-3.5-flash
+  # curator: gemini/gemini-3.1-pro-preview
   # OpenRouter — one key, hundreds of models. Prefix the model with openrouter/
   # and set OPENROUTER_API_KEY:
   # lens: openrouter/anthropic/claude-3.5-haiku
