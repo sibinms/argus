@@ -548,6 +548,37 @@ def test_reconstruct_finding_returns_none_for_unparseable_body():
     assert ghmod._reconstruct_finding(comment) is None
 
 
+def test_reconstruct_finding_handles_summary_with_asterisks_and_parens():
+    f = _finding(2)
+    f.summary = "Uses **bold** markdown and a (parenthetical) aside"
+    comment = MagicMock()
+    comment.body = ghmod._comment_body(f)
+    comment.path = "a.py"
+    comment.line = 2
+
+    reconstructed = ghmod._reconstruct_finding(comment)
+
+    assert reconstructed is not None
+    assert reconstructed.summary == f.summary
+    assert reconstructed.lens == f.lens
+    assert reconstructed.confidence == f.confidence
+
+
+def test_reconstruct_finding_rejects_trailing_text_after_header():
+    """The $ anchor exists specifically to reject a header line with
+    unexpected trailing content after the confidence parenthetical --
+    without it, a regression could silently accept malformed input."""
+    comment = MagicMock()
+    comment.body = (
+        "<!-- argus:fp:aaaaaaaaaaaa -->\n"
+        "**a summary** *(lens: tests, confidence: high)* extra trailing text\n\ndetail"
+    )
+    comment.path = "a.py"
+    comment.line = 1
+
+    assert ghmod._reconstruct_finding(comment) is None
+
+
 def test_recuration_skipped_when_no_replies(monkeypatch):
     pr = _fake_pr([None])
     _patch_github(monkeypatch, pr)
