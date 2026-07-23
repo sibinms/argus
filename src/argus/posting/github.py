@@ -124,8 +124,14 @@ def _posted_inline_comments(pr) -> dict[str, PullRequestComment]:
     return posted
 
 
+_CONFIDENCE_LEVELS = "low|medium|high"
+# Greedy summary + anchored at end-of-line: a summary containing "**" or ")"
+# still parses correctly, since regex backtracking finds the last position
+# where the fixed " *(lens: ..., confidence: ...)*" suffix matches, not the
+# first "**" it happens to see.
 _COMMENT_HEADER_RE = re.compile(
-    r"\*\*(?P<summary>.+)\*\* \*\(lens: (?P<lens>[^,]+), confidence: (?P<confidence>\w+)\)\*"
+    r"^\*\*(?P<summary>.*)\*\* \*\(lens: (?P<lens>[^,]+), "
+    rf"confidence: (?P<confidence>{_CONFIDENCE_LEVELS})\)\*$"
 )
 
 
@@ -139,12 +145,19 @@ def _reconstruct_finding(comment: PullRequestComment) -> Finding | None:
     this, that reply would just be silently ignored: recurate_with_replies
     only ever looks at findings the current run actually produced. Rebuilt
     from the comment's own rendered text (see _comment_body) — best-effort,
-    since only what that text captured is recoverable."""
+    since only what that text captured is recoverable. Logs when it can't,
+    since a reply that goes unconsidered should be visible, not silent."""
     body = comment.body or ""
     without_marker = _FP_MARKER.sub("", body, count=1).strip()
     header, _, detail = without_marker.partition("\n")
     match = _COMMENT_HEADER_RE.search(header)
     if not match:
+        logger.warning(
+            "could not reconstruct finding from posted comment on %s:%s — "
+            "a reply on this thread will not be re-judged",
+            comment.path,
+            comment.line,
+        )
         return None
     return Finding(
         lens=match.group("lens"),
@@ -399,12 +412,12 @@ def post_to_github(
         reconstructed = _reconstruct_finding(posted_inline[fp])
         if reconstructed is not None:
             stale_targets.append(reconstructed)
-    combined = findings + stale_targets
-    recurate_with_replies(combined, replies, context, curator_model)
-    # recurate_with_replies mutates the Finding objects it's given in place
-    # (see _apply_decision), so `findings` already reflects any change to
-    # findings this run produced fresh — stale_targets' statuses below
-    # reflect the same in-place mutation for the reconstructed ones.
+    combined = recurate_with_replies(findings + stale_targets, replies, context, curator_model)
+    # Sliced back out by position rather than relied on as the same objects
+    # in place — recurate_with_replies mutates its Finding objects today,
+    # but this way the split is correct even if that ever changes to
+    # returning fresh ones instead.
+    findings, stale_targets = combined[: len(findings)], combined[len(findings) :]
     reply_addressed_fps = {_fingerprint(f) for f in stale_targets if f.status == "dropped"}
 
     anchorable = commentable_lines(pr)

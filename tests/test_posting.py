@@ -473,6 +473,40 @@ def test_reply_on_stale_finding_not_rediscovered_this_run_still_gets_recurated(m
     assert resolved == ["T1"]  # dropped via reply -> resolved despite a.py not being touched
 
 
+def test_reply_on_stale_finding_kept_after_recuration_does_not_resolve_its_thread(monkeypatch):
+    """A reply doesn't unilaterally win -- if the curator still keeps a
+    reconstructed stale finding after considering the reply, its thread
+    must stay open, not get resolved just because it was reconstructed."""
+    f = _finding(2)
+    fp = _fingerprint(f)
+    existing = MagicMock()
+    existing.body = ghmod._comment_body(f)
+    existing.path = "a.py"
+    existing.line = 2
+    pr = _fake_pr(posted_comments=[existing])
+    _patch_github(monkeypatch, pr)
+    monkeypatch.setattr(
+        ghmod,
+        "_fetch_review_threads",
+        lambda *a, **k: [
+            {"id": "T1", "isResolved": False, "firstBody": existing.body, "comments": []}
+        ],
+    )
+    monkeypatch.setattr(
+        ghmod, "thread_replies_by_fingerprint", lambda threads: {fp: ["not convincing"]}
+    )
+    resolved: list[str] = []
+    monkeypatch.setattr(ghmod, "_graphql_resolve_thread", lambda tid, tok: resolved.append(tid))
+    # Curator considers the reply but keeps the finding -- status unchanged.
+    monkeypatch.setattr(
+        ghmod, "recurate_with_replies", lambda findings, replies, ctx, model: findings
+    )
+
+    _post(findings=[], context=_ctx(changed_paths=["unrelated.py"]))
+
+    assert resolved == []
+
+
 def test_reply_on_fingerprint_with_no_posted_comment_does_not_raise(monkeypatch):
     """A reply's fingerprint should always match an already-posted comment
     in practice -- but if it somehow doesn't, reconstruction must be
