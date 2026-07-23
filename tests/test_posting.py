@@ -51,9 +51,9 @@ def _patch_github(monkeypatch, pr):
     gh = MagicMock()
     gh.get_repo.return_value = repo
     monkeypatch.setattr(ghmod, "Github", lambda *a, **k: gh)
-    # No replies by default — most tests aren't exercising reply-awareness,
-    # and this also avoids a real network call to the GraphQL API.
-    monkeypatch.setattr(ghmod, "fetch_thread_replies", lambda *a, **k: {})
+    # No threads/replies by default — most tests aren't exercising
+    # reply-awareness, and this also avoids a real network call.
+    monkeypatch.setattr(ghmod, "_fetch_review_threads", lambda *a, **k: [])
 
 
 def _post(pr_or_none_findings=None, findings=None, posting=None, **kwargs):
@@ -186,6 +186,25 @@ def test_already_posted_finding_is_not_reposted(monkeypatch):
     pr.create_issue_comment.assert_not_called()
 
 
+def test_finding_already_posted_inline_is_not_duplicated_to_overflow(monkeypatch):
+    """If a finding's line becomes un-anchorable across runs (e.g. after a
+    force-push), it lands in overflow_candidates this run — but it's already
+    sitting inline from a previous run, so it must not be posted again."""
+    f = _finding(2)  # was inline-anchorable when first posted
+    existing = MagicMock()
+    existing.body = f"<!-- argus:fp:{_fingerprint(f)} -->\npreviously posted"
+    pr = _fake_pr(posted_comments=[existing])
+    _patch_github(monkeypatch, pr)
+
+    # Same underlying finding, but now on a line outside the diff -> overflow.
+    orphaned = _finding(999)
+    orphaned.summary = f.summary  # same fingerprint as f (summary drives it)
+
+    _post(findings=[orphaned])
+
+    pr.create_issue_comment.assert_not_called()
+
+
 def test_finding_on_non_diff_line_goes_to_overflow_comment(monkeypatch):
     pr = _fake_pr([None])
     _patch_github(monkeypatch, pr)
@@ -199,6 +218,28 @@ def test_finding_on_non_diff_line_goes_to_overflow_comment(monkeypatch):
     body = pr.create_issue_comment.call_args.args[0]
     assert "argus:overflow" in body
     assert _fingerprint(_finding(999)) in body
+
+
+def test_overflow_comment_failure_does_not_block_inline_comments(monkeypatch):
+    """The overflow comment is posted after the review — a transient failure
+    creating it must not prevent inline comments (independent, already
+    successfully prepared) from landing."""
+    pr = _fake_pr([None])
+    _patch_github(monkeypatch, pr)
+    pr.create_issue_comment.side_effect = GithubException(
+        500, data={"message": "server error"}, headers=None
+    )
+
+    inline_finding = _f("inline issue", line=1)
+    overflow_finding = _f("overflow issue", line=999)
+
+    with pytest.raises(GithubException):
+        _post(findings=[inline_finding, overflow_finding])
+
+    # The inline review was posted successfully before the overflow comment
+    # was attempted and failed.
+    pr.create_review.assert_called_once()
+    assert pr.create_review.call_args.kwargs["comments"]
 
 
 def test_overflow_finding_already_surfaced_is_not_reposted(monkeypatch):
@@ -302,8 +343,9 @@ def test_reply_on_still_flagged_finding_triggers_recuration(monkeypatch):
     prior.state = "COMMENTED"
     pr = _fake_pr(posted_comments=[existing], prior_reviews=[prior])
     _patch_github(monkeypatch, pr)
-    monkeypatch.setattr(ghmod, "fetch_thread_replies", lambda *a, **k: {fp: ["intentional, see X"]})
-    monkeypatch.setattr(ghmod, "_graphql_review_threads", lambda *a: [])
+    monkeypatch.setattr(
+        ghmod, "thread_replies_by_fingerprint", lambda threads: {fp: ["intentional, see X"]}
+    )
     resolved: list[str] = []
     monkeypatch.setattr(ghmod, "_graphql_resolve_thread", lambda tid, tok: resolved.append(tid))
 
@@ -330,8 +372,9 @@ def test_recuration_skipped_when_no_replies(monkeypatch):
     def boom(*a, **k):
         raise AssertionError("recurate_with_replies should be a no-op with no replies")
 
-    # fetch_thread_replies already returns {} via _patch_github; recurate_with_replies
-    # itself is the real function, which must no-op (not call curate_with_model) here.
+    # _fetch_review_threads already returns [] via _patch_github, so
+    # thread_replies_by_fingerprint([]) == {}; recurate_with_replies itself
+    # is the real function, which must no-op (not call curate_with_model).
     _post(findings=[_finding(2)])
     assert pr.create_review.call_count == 1
 
@@ -346,30 +389,34 @@ def test_resolves_only_addressed_unresolved_threads(monkeypatch):
         {"id": "T3", "isResolved": True, "firstBody": "<!-- argus:fp:aaaaaaaaaaaa -->\nz"},
     ]
     resolved: list[str] = []
-    monkeypatch.setattr(ghmod, "_graphql_review_threads", lambda *a: threads)
     monkeypatch.setattr(ghmod, "_graphql_resolve_thread", lambda tid, tok: resolved.append(tid))
 
-    ghmod._resolve_addressed_threads("o/r", 1, "tok", {"aaaaaaaaaaaa"})
+    ghmod._resolve_addressed_threads(threads, "tok", {"aaaaaaaaaaaa"})
 
     # T1: addressed + unresolved -> resolve. T2: not addressed. T3: already resolved.
     assert resolved == ["T1"]
 
 
 def test_resolve_addressed_noop_when_nothing_addressed(monkeypatch):
-    called: list[int] = []
-    monkeypatch.setattr(ghmod, "_graphql_review_threads", lambda *a: called.append(1) or [])
-    ghmod._resolve_addressed_threads("o/r", 1, "tok", set())
-    assert called == []  # no API call when there's nothing to resolve
+    called: list[str] = []
+    monkeypatch.setattr(ghmod, "_graphql_resolve_thread", lambda tid, tok: called.append(tid))
+    threads = [{"id": "T1", "isResolved": False, "firstBody": "<!-- argus:fp:aaaaaaaaaaaa -->\nx"}]
+
+    ghmod._resolve_addressed_threads(threads, "tok", set())
+
+    assert called == []  # no resolve mutation when there's nothing to resolve
 
 
 def test_resolve_addressed_swallows_api_errors(monkeypatch, caplog):
-    def boom(*args):
+    threads = [{"id": "T1", "isResolved": False, "firstBody": "<!-- argus:fp:aaaaaaaaaaaa -->\nx"}]
+
+    def boom(tid, tok):
         raise RuntimeError("graphql down")
 
-    monkeypatch.setattr(ghmod, "_graphql_review_threads", boom)
+    monkeypatch.setattr(ghmod, "_graphql_resolve_thread", boom)
     # best-effort housekeeping must never break the run, but must log
     with caplog.at_level("WARNING"):
-        ghmod._resolve_addressed_threads("o/r", 1, "tok", {"aaaaaaaaaaaa"})
+        ghmod._resolve_addressed_threads(threads, "tok", {"aaaaaaaaaaaa"})
     assert "failed to resolve addressed review threads" in caplog.text
 
 
@@ -407,15 +454,15 @@ def test_thread_replies_skips_threads_with_no_fingerprint_marker():
     assert ghmod.thread_replies_by_fingerprint(threads) == {}
 
 
-def test_fetch_thread_replies_swallows_errors(monkeypatch, caplog):
+def test_fetch_review_threads_swallows_errors(monkeypatch, caplog):
     monkeypatch.setattr(
         ghmod,
         "_graphql_review_threads",
         lambda *a: (_ for _ in ()).throw(RuntimeError("down")),
     )
     with caplog.at_level("WARNING"):
-        assert ghmod.fetch_thread_replies("o/r", 1, "tok") == {}
-    assert "failed to fetch review-thread replies" in caplog.text
+        assert ghmod._fetch_review_threads("o/r", 1, "tok") == []
+    assert "failed to fetch review threads" in caplog.text
 
 
 # ---- overflow comment ----

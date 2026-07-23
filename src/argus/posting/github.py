@@ -173,16 +173,14 @@ def _last_bot_event(pr) -> str | None:
     return last
 
 
-def _resolve_addressed_threads(
-    repo_full_name: str, pr_number: int, token: str, addressed_fps: set[str]
-) -> None:
+def _resolve_addressed_threads(threads: list[dict], token: str, addressed_fps: set[str]) -> None:
     """Best-effort: collapse (resolve) the review threads whose finding is no
-    longer raised. Uses the GraphQL API; any failure here is non-fatal —
+    longer raised. Takes already-fetched threads (see _fetch_review_threads)
+    rather than fetching its own copy. Any failure here is non-fatal —
     resolution is housekeeping, not part of posting the review."""
     if not addressed_fps:
         return
     try:
-        threads = _graphql_review_threads(repo_full_name, pr_number, token)
         for thread in threads:
             if thread["isResolved"]:
                 continue
@@ -191,9 +189,9 @@ def _resolve_addressed_threads(
             if match and match.group(1) in addressed_fps:
                 _graphql_resolve_thread(thread["id"], token)
     except Exception:
-        # Never let housekeeping break the run, but a persistent GraphQL
-        # failure here means threads silently pile up unresolved forever —
-        # worth a log, same as the other best-effort calls in this module.
+        # Never let housekeeping break the run, but a persistent failure
+        # here means threads silently pile up unresolved forever — worth a
+        # log, same as the other best-effort calls in this module.
         logger.warning("failed to resolve addressed review threads", exc_info=True)
 
 
@@ -272,17 +270,17 @@ def thread_replies_by_fingerprint(threads: list[dict]) -> dict[str, list[str]]:
     return replies
 
 
-def fetch_thread_replies(repo_full_name: str, pr_number: int, token: str) -> dict[str, list[str]]:
-    """Best-effort: replies keyed by finding fingerprint. Any failure returns
-    no replies rather than breaking the run — reply-awareness is an
-    enhancement, not required for posting to work — but still logs a
-    warning so a persistent GraphQL failure doesn't go unnoticed."""
+def _fetch_review_threads(repo_full_name: str, pr_number: int, token: str) -> list[dict]:
+    """Best-effort: the PR's review threads, fetched once and shared by both
+    reply-awareness and addressed-thread resolution — they need the same
+    GraphQL data, so this avoids each making its own round-trip for it. Any
+    failure returns no threads rather than breaking the run; both consumers
+    already treat an empty list as "nothing to do here"."""
     try:
-        threads = _graphql_review_threads(repo_full_name, pr_number, token)
-        return thread_replies_by_fingerprint(threads)
+        return _graphql_review_threads(repo_full_name, pr_number, token)
     except Exception:
-        logger.warning("failed to fetch review-thread replies", exc_info=True)
-        return {}
+        logger.warning("failed to fetch review threads", exc_info=True)
+        return []
 
 
 def _new_findings_sorted(
@@ -312,10 +310,15 @@ def post_to_github(
     repo = gh.get_repo(repo_full_name)
     pr = repo.get_pull(pr_number)
 
+    # Fetched once — reply-awareness and addressed-thread resolution both
+    # need the same review-thread data, so share the one GraphQL round-trip
+    # instead of each making their own.
+    threads = _fetch_review_threads(repo_full_name, pr_number, token)
+
     # A finding still flagged but with a reply on its thread (from someone
     # other than Argus) gets re-judged with that reply as context, before
     # anything else decides what's new/addressed this run.
-    replies = fetch_thread_replies(repo_full_name, pr_number, token)
+    replies = thread_replies_by_fingerprint(threads)
     findings = recurate_with_replies(findings, replies, context, curator_model)
 
     anchorable = commentable_lines(pr)
@@ -348,17 +351,14 @@ def post_to_github(
 
     # Findings that can't attach to a diff line — or that could, but didn't
     # fit under the inline cap — get the same new-vs-already-posted
-    # treatment, just via a small standalone comment instead of an inline
-    # thread, posted only when there's something new to say there.
+    # treatment via a small standalone comment instead of an inline thread.
+    # Excludes anything already posted *inline* too (posted_fps), not just
+    # anything already in the overflow comment — otherwise a finding whose
+    # line becomes un-anchorable across runs (e.g. after a force-push) would
+    # get posted a second time here despite already having an inline thread.
     overflow_candidates = overflow_findings + bumped_by_cap
-    overflow_posted_fps = _posted_overflow_fingerprints(pr)
+    overflow_posted_fps = _posted_overflow_fingerprints(pr) | posted_fps
     new_overflow, _ = _new_findings_sorted(overflow_candidates, overflow_posted_fps)
-    if new_overflow:
-        # Deliberately not caught: a failure here means real findings didn't
-        # reach the PR at all, which should fail the run loudly rather than
-        # be logged and quietly dropped (unlike fetch_thread_replies, which
-        # is a best-effort enhancement on top of posting, not posting itself).
-        pr.create_issue_comment(_overflow_comment_body(new_overflow))
 
     v = verdict(findings, posting)
     if v == "approve":
@@ -369,7 +369,7 @@ def post_to_github(
 
     # Resolve threads for findings that have since been addressed (fixed in
     # the diff, or dismissed by a reply the curator accepted above).
-    _resolve_addressed_threads(repo_full_name, pr_number, token, addressed_fps)
+    _resolve_addressed_threads(threads, token, addressed_fps)
 
     # Submit a formal review only when there is something new to say: a new
     # inline or overflow comment, or a verdict that differs from Argus's last
@@ -400,3 +400,11 @@ def post_to_github(
             pr.create_review(body=review_body, event="COMMENT")
         else:
             raise
+
+    # Posted after the review, deliberately not caught: a failure here means
+    # real findings didn't reach the PR at all, which should fail the run
+    # loudly — but only once the independent, already-successful inline
+    # comments above are safely posted, so an overflow failure doesn't take
+    # those down as collateral damage.
+    if new_overflow:
+        pr.create_issue_comment(_overflow_comment_body(new_overflow))
