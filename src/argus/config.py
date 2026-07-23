@@ -56,8 +56,8 @@ class PostingConfig:
     # rather than failing. Off by default so no one's clean PR errors out.
     approve_reviews: bool = False
     # Hard lifetime cap on inline comments Argus will place on a PR. Once
-    # reached, further findings appear in the rolling summary only — so the
-    # PR can never fill up with comments no matter how many times Argus runs.
+    # reached, further findings appear in the overflow comment instead — so
+    # the PR can never fill up with comments no matter how many times Argus runs.
     max_inline_comments: int = 10
 
 

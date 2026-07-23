@@ -17,6 +17,7 @@ from __future__ import annotations
 
 from argus.context.gather import Context
 from argus.curator.evidence import quote_appears_in_context
+from argus.fingerprint import fingerprint as _fingerprint
 from argus.lenses.base import Finding
 from argus.models.client import curate_with_model
 
@@ -58,43 +59,77 @@ def dedupe(findings: list[Finding]) -> list[Finding]:
     return merged
 
 
+def _apply_decision(finding: Finding, decision: dict, context: Context) -> Finding:
+    action = decision.get("action", "keep")
+    reason = decision.get("reason", "")
+    evidence_quote = decision.get("evidence_quote")
+
+    if action == "drop_noise":
+        # Not a claim about the code (narration / mis-scoped impact), so no
+        # quote is required — the finding's own wording is the grounds.
+        finding.status = "dropped"
+        finding.drop_reason = reason
+    elif action == "drop":
+        if quote_appears_in_context(evidence_quote, context):
+            finding.status = "dropped"
+            finding.drop_reason = reason
+        else:
+            # Curator couldn't back its own claim with real text — refuse
+            # the drop and keep the finding, downgraded, with a note.
+            finding.status = "downgraded"
+            finding.confidence = "low"
+            finding.drop_reason = (
+                f"curator tried to drop this but its cited evidence wasn't "
+                f"found in the diff/files, so it was kept at low confidence "
+                f"(original curator reason: {reason})"
+            )
+    elif action == "downgrade":
+        finding.status = "downgraded"
+        finding.confidence = decision.get("confidence", "low")
+        finding.drop_reason = reason
+    else:
+        finding.status = "kept"
+        finding.confidence = decision.get("confidence", finding.confidence)
+
+    return finding
+
+
 def curate(findings: list[Finding], context: Context, model: str) -> list[Finding]:
     deduped = dedupe(findings)
     decisions = curate_with_model(deduped, context, model)
+    return [
+        _apply_decision(finding, decision, context) for finding, decision in zip(deduped, decisions)
+    ]
 
-    curated: list[Finding] = []
-    for finding, decision in zip(deduped, decisions):
-        action = decision.get("action", "keep")
-        reason = decision.get("reason", "")
-        evidence_quote = decision.get("evidence_quote")
 
-        if action == "drop_noise":
-            # Not a claim about the code (narration / mis-scoped impact), so no
-            # quote is required — the finding's own wording is the grounds.
-            finding.status = "dropped"
-            finding.drop_reason = reason
-        elif action == "drop":
-            if quote_appears_in_context(evidence_quote, context):
-                finding.status = "dropped"
-                finding.drop_reason = reason
-            else:
-                # Curator couldn't back its own claim with real text — refuse
-                # the drop and keep the finding, downgraded, with a note.
-                finding.status = "downgraded"
-                finding.confidence = "low"
-                finding.drop_reason = (
-                    f"curator tried to drop this but its cited evidence wasn't "
-                    f"found in the diff/files, so it was kept at low confidence "
-                    f"(original curator reason: {reason})"
-                )
-        elif action == "downgrade":
-            finding.status = "downgraded"
-            finding.confidence = decision.get("confidence", "low")
-            finding.drop_reason = reason
-        else:
-            finding.status = "kept"
-            finding.confidence = decision.get("confidence", finding.confidence)
+def recurate_with_replies(
+    findings: list[Finding], replies: dict[str, list[str]], context: Context, model: str
+) -> list[Finding]:
+    """For findings whose GitHub thread has a reply from someone other than
+    Argus itself, re-runs the curator with that reply folded into the
+    finding's own context — so a human explaining why a finding doesn't
+    apply (or pushing back on it) can change the verdict on a later run,
+    instead of the same finding being silently re-flagged forever.
 
-        curated.append(finding)
+    A reply can move a finding to drop_noise or downgrade, exactly like a
+    normal curation pass — but "drop" still requires a real diff/file quote,
+    the same rule as always. A reply is the PR author's word, not verifiable
+    evidence, so it can't unilaterally prove a finding wrong the way a quoted
+    line of code can.
+    """
+    targets = [f for f in findings if _fingerprint(f) in replies]
+    if not targets:
+        return findings
 
-    return curated
+    for f in targets:
+        reply_text = "\n\n".join(replies[_fingerprint(f)])
+        f.detail = (
+            f"{f.detail}\n\n---\nReply on this finding's thread (from someone other "
+            f"than Argus, on a previous review round):\n{reply_text}"
+        )
+
+    decisions = curate_with_model(targets, context, model)
+    for finding, decision in zip(targets, decisions):
+        _apply_decision(finding, decision, context)
+
+    return findings

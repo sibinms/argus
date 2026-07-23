@@ -1,7 +1,8 @@
 import sys
 
 from argus.context.gather import ChangedFile, Context
-from argus.curator.curate import curate
+from argus.curator.curate import curate, recurate_with_replies
+from argus.fingerprint import fingerprint
 from argus.lenses.base import Finding
 
 
@@ -68,3 +69,76 @@ def test_keep_sets_confidence(monkeypatch):
     out = curate([_finding()], _ctx(), "m")
     assert out[0].status == "kept"
     assert out[0].confidence == "high"
+
+
+def test_recurate_with_replies_ignores_findings_with_no_reply(monkeypatch):
+    def boom(findings, ctx, model):
+        raise AssertionError("curate_with_model should not be called with no replies")
+
+    module = sys.modules["argus.curator.curate"]
+    monkeypatch.setattr(module, "curate_with_model", boom)
+
+    f = _finding()
+    out = recurate_with_replies([f], {}, _ctx(), "m")
+    assert out == [f]
+    assert f.detail == "d"  # untouched
+
+
+def test_recurate_with_replies_folds_reply_into_detail_and_reapplies_decision(monkeypatch):
+    f = _finding()
+    fp = fingerprint(f)
+    captured = {}
+
+    def fake_curate(findings, ctx, model):
+        captured["detail"] = findings[0].detail
+        return [{"action": "drop_noise", "reason": "author explained it's intentional"}]
+
+    module = sys.modules["argus.curator.curate"]
+    monkeypatch.setattr(module, "curate_with_model", fake_curate)
+
+    out = recurate_with_replies([f], {fp: ["this is intentional, see ENG-123"]}, _ctx(), "m")
+
+    assert "this is intentional, see ENG-123" in captured["detail"]
+    assert out[0].status == "dropped"
+    assert out[0].drop_reason == "author explained it's intentional"
+
+
+def test_recurate_with_replies_still_requires_a_real_quote_for_drop(monkeypatch):
+    # A reply can't unilaterally prove a finding wrong the way a diff quote
+    # can — "drop" via a reply with no real evidence_quote must still refuse
+    # and downgrade instead, same rule as a normal curation pass.
+    f = _finding()
+    fp = fingerprint(f)
+
+    module = sys.modules["argus.curator.curate"]
+    monkeypatch.setattr(
+        module,
+        "curate_with_model",
+        lambda findings, ctx, model: [
+            {"action": "drop", "reason": "trust me", "evidence_quote": "nowhere in the diff"}
+        ],
+    )
+
+    out = recurate_with_replies([f], {fp: ["trust me, it's fine"]}, _ctx(), "m")
+    assert out[0].status == "downgraded"
+    assert out[0].confidence == "low"
+
+
+def test_recurate_with_replies_leaves_unmatched_findings_untouched(monkeypatch):
+    f1 = _finding()
+    f2 = Finding(
+        lens="tests", file="b.py", line=1, summary="other issue", detail="d2", confidence="medium"
+    )
+    fp1 = fingerprint(f1)
+
+    module = sys.modules["argus.curator.curate"]
+    monkeypatch.setattr(
+        module,
+        "curate_with_model",
+        lambda findings, ctx, model: [{"action": "drop_noise", "reason": "r"}],
+    )
+
+    out = recurate_with_replies([f1, f2], {fp1: ["a reply"]}, _ctx(), "m")
+    assert out[0].status == "dropped"  # re-judged
+    assert out[1].detail == "d2"  # f2 has no reply, left exactly as-is
+    assert out[1].status == "proposed"

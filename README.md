@@ -288,14 +288,23 @@ bot approval shows as Approved but doesn't count toward a branch-protection
 ### No comment pile-up
 
 Argus reviews every push, but it moderates itself rather than stacking
-comments:
+comments — and posts a genuinely new comment only when there's something new
+to say, never an invisible edit to something old:
 
-- **One rolling summary** comment, edited in place each run — never duplicated.
 - **Each finding is posted inline once** (fingerprinted so re-wording or line
-  drift doesn't create duplicates), and its thread is **resolved** once the
-  finding is addressed.
+  drift doesn't create duplicates), on the diff line it applies to. A finding
+  that can't attach to a line (a file-level or architectural concern) goes in
+  a small separate comment instead, under the same one-time rule.
+- **Replies count.** If a finding is still flagged but someone's replied on
+  its thread, Argus re-runs the curator with that reply as context before
+  deciding what's new — so explaining why a finding doesn't apply can change
+  the verdict on the next run instead of the same comment reappearing forever.
+  A reply can downgrade or dismiss a finding, but can't out-argue a real quote
+  from the diff — that's still the only way to fully drop one.
+- A finding's thread is **resolved** once the finding is addressed in the code
+  (or dismissed via a reply the curator accepts).
 - A **hard cap** (`max_inline_comments`, default 10) bounds inline comments for
-  the life of the PR; beyond it, findings live in the summary only.
+  the life of the PR.
 - A new review is submitted **only when something changed** — otherwise Argus
   stays quiet.
 
