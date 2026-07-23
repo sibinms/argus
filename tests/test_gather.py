@@ -183,6 +183,35 @@ def test_gather_github_without_since_sha_uses_full_diff(monkeypatch):
     assert ctx.changed_paths == ["a.py"]
 
 
+def test_gather_github_changed_paths_excludes_ignored_files(monkeypatch):
+    """changed_paths must reflect what a lens actually saw, not the raw diff
+    -- an ignored file's patch is never included, so it must never count as
+    "touched" either (posting uses this to decide whether a no-longer-raised
+    finding is safe to treat as addressed)."""
+    kept = MagicMock()
+    kept.filename = "app.py"
+    kept.patch = "@@ -1 +1 @@\n+real change\n"
+    ignored = MagicMock()
+    ignored.filename = "yarn.lock"
+    ignored.patch = "@@ -1 +1 @@\n+lockfile noise\n"
+
+    pr = MagicMock()
+    pr.title = "t"
+    pr.body = "b"
+    pr.head.sha = "s"
+    pr.get_files.return_value = [kept, ignored]
+    repo = MagicMock()
+    repo.get_pull.return_value = pr
+    repo.get_contents.side_effect = GithubException(404, data={}, headers=None)
+    gh = MagicMock()
+    gh.get_repo.return_value = repo
+    monkeypatch.setattr(github, "Github", lambda *a, **k: gh)
+
+    ctx = gather_github("o/r", 1, "tok", ContextConfig(ignore_globs=["yarn.lock"]))
+
+    assert ctx.changed_paths == ["app.py"]
+
+
 def test_gather_local_sets_changed_paths(tmp_path, monkeypatch):
     def run(*args):
         subprocess.run(["git", *args], cwd=tmp_path, check=True, capture_output=True)
@@ -229,3 +258,6 @@ def test_gather_local_excludes_ignored_files_from_the_diff_itself(tmp_path, monk
     # the ignored file still appears in changed_files' path list via
     # apply_budget's own filtering — just not with diff/content leaked in.
     assert all(f.path != "yarn.lock" for f in ctx.changed_files)
+    # changed_paths must match: a lens was never shown yarn.lock, so it must
+    # never count as "touched" for posting's addressed-thread scoping.
+    assert ctx.changed_paths == ["app.py"]

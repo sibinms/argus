@@ -79,7 +79,11 @@ def gather_local(base_ref: str, head_ref: str, config: ContextConfig) -> Context
     files = [ChangedFile(path=p, content=_read_file(p)) for p in changed_paths]
     files = apply_budget(files, config)
 
-    return Context(diff=diff, changed_files=files, changed_paths=changed_paths)
+    # changed_paths on the Context is "what a lens actually saw", not every
+    # file in the raw diff -- an ignored file's hunk is never in `diff`, so
+    # counting it as touched would let posting wrongly resolve a still-open
+    # finding on a file the lens was never shown this run.
+    return Context(diff=diff, changed_files=files, changed_paths=included_paths)
 
 
 def gather_github(
@@ -129,7 +133,15 @@ def gather_github(
             content = None
         files.append(ChangedFile(path=pr_file.filename, content=content))
 
-    changed_paths = [pr_file.filename for pr_file in pr_files]
+    # As in gather_local: changed_paths is "what a lens actually saw", so it
+    # excludes ignored files -- their patch is never in `diff`, and counting
+    # them as touched would let posting wrongly resolve a still-open finding
+    # on a file the lens was never shown this run.
+    changed_paths = [
+        pr_file.filename
+        for pr_file in pr_files
+        if not is_ignored(pr_file.filename, config.ignore_globs)
+    ]
     files = apply_budget(files, config)
 
     return Context(
