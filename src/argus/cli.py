@@ -125,7 +125,9 @@ def review(
     findings = run_review(context, config)
 
     if config.is_active and github:
-        post_to_github(repo, pr_number, token, findings, config.posting)
+        post_to_github(
+            repo, pr_number, token, findings, config.posting, context, config.models.curator
+        )
         click.echo(f"Posted review to {repo}#{pr_number}.")
     elif config.is_active and not github:
         click.echo(
