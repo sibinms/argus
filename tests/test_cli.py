@@ -83,13 +83,13 @@ def test_lens_and_curator_model_flags_override_config(tmp_path, monkeypatch):
             "--lens-model",
             "gpt-4o-mini",
             "--curator-model",
-            "gemini/gemini-2.5-pro",
+            "gemini/gemini-3.1-pro-preview",
         ],
     )
 
     assert result.exit_code == 0
     assert seen_configs[0].models.lens == "gpt-4o-mini"
-    assert seen_configs[0].models.curator == "gemini/gemini-2.5-pro"
+    assert seen_configs[0].models.curator == "gemini/gemini-3.1-pro-preview"
 
 
 def test_model_flags_override_an_existing_config_file(tmp_path, monkeypatch):

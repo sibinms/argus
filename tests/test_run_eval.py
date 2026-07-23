@@ -25,10 +25,10 @@ def test_build_config_defaults_when_env_vars_absent(monkeypatch):
 
 
 def test_build_config_applies_env_var_overrides(monkeypatch):
-    monkeypatch.setenv("ARGUS_EVAL_LENS_MODEL", "gemini/gemini-2.5-flash")
-    monkeypatch.setenv("ARGUS_EVAL_CURATOR_MODEL", "gemini/gemini-2.5-pro")
+    monkeypatch.setenv("ARGUS_EVAL_LENS_MODEL", "gemini/gemini-3.5-flash")
+    monkeypatch.setenv("ARGUS_EVAL_CURATOR_MODEL", "gemini/gemini-3.1-pro-preview")
 
     config = run_eval.build_config()
 
-    assert config.models.lens == "gemini/gemini-2.5-flash"
-    assert config.models.curator == "gemini/gemini-2.5-pro"
+    assert config.models.lens == "gemini/gemini-3.5-flash"
+    assert config.models.curator == "gemini/gemini-3.1-pro-preview"

@@ -18,11 +18,13 @@ jobs:
   review:
     runs-on: ubuntu-latest
     # Provider key for the models in .argus/config.yml. Set at job level so
-    # it's inherited by the composite action's steps. Using Gemini (free
-    # tier) here; for another provider, set that provider's key instead
-    # (OPENAI_API_KEY, ANTHROPIC_API_KEY, ...) and switch the config models.
+    # it's inherited by the composite action's steps. Using DeepSeek here
+    # (cheap, much higher rate limits than Gemini's free tier, which kept
+    # 429/503ing under this repo's own parallel-lens load); for another
+    # provider, set that provider's key instead (OPENAI_API_KEY,
+    # ANTHROPIC_API_KEY, ...) and switch the config models.
     env:
-      GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+      DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
     steps:
       # This repo's PRs *are* changes to Argus, so we review each PR with the
       # code in that PR (the local ./ action) rather than the last release.
