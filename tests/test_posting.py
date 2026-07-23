@@ -406,19 +406,112 @@ def test_reply_on_still_flagged_finding_triggers_recuration(monkeypatch):
     monkeypatch.setattr(ghmod, "_graphql_resolve_thread", lambda tid, tok: resolved.append(tid))
 
     captured = {}
-    monkeypatch.setattr(
-        ghmod,
-        "recurate_with_replies",
-        lambda findings, replies, ctx, model: (
-            captured.update(replies=replies, findings=findings) or []
-        ),  # curator drops it entirely -> nothing left to post
-    )
+
+    def fake_recurate(findings, replies, ctx, model):
+        captured.update(replies=replies, findings=findings)
+        # Real recurate_with_replies mutates matching findings in place
+        # (status/confidence/drop_reason) and never shrinks the list --
+        # simulate the curator dropping it via that same contract.
+        for finding in findings:
+            if _fingerprint(finding) in replies:
+                finding.status = "dropped"
+        return findings
+
+    monkeypatch.setattr(ghmod, "recurate_with_replies", fake_recurate)
 
     _post(findings=[f])
 
     assert captured["replies"] == {fp: ["intentional, see X"]}
     # dropped by recuration, verdict unchanged from last review -> stays quiet
     pr.create_review.assert_not_called()
+
+
+def test_reply_on_stale_finding_not_rediscovered_this_run_still_gets_recurated(monkeypatch):
+    """Under incremental review, a finding's file may not be in this run's
+    diff scope even though a fresh reply just landed on its thread -- it
+    must still be reconstructed from its own posted comment and re-judged,
+    not silently ignored just because this run's fresh findings list is
+    empty (or simply doesn't happen to include it)."""
+    f = _finding(2)
+    fp = _fingerprint(f)
+    existing = MagicMock()
+    existing.body = ghmod._comment_body(f)
+    existing.path = "a.py"
+    existing.line = 2
+    pr = _fake_pr(posted_comments=[existing])
+    _patch_github(monkeypatch, pr)
+    monkeypatch.setattr(
+        ghmod,
+        "_fetch_review_threads",
+        lambda *a, **k: [
+            {"id": "T1", "isResolved": False, "firstBody": existing.body, "comments": []}
+        ],
+    )
+    monkeypatch.setattr(
+        ghmod, "thread_replies_by_fingerprint", lambda threads: {fp: ["fixed now, see commit X"]}
+    )
+    resolved: list[str] = []
+    monkeypatch.setattr(ghmod, "_graphql_resolve_thread", lambda tid, tok: resolved.append(tid))
+
+    captured = {}
+
+    def fake_recurate(findings, replies, ctx, model):
+        captured["fingerprints"] = {ghmod._fingerprint(x) for x in findings}
+        for finding in findings:
+            if ghmod._fingerprint(finding) in replies:
+                finding.status = "dropped"
+        return findings
+
+    monkeypatch.setattr(ghmod, "recurate_with_replies", fake_recurate)
+
+    # This run's fresh findings are empty (e.g. incremental diff saw
+    # nothing new) and its diff scope doesn't include "a.py" -- neither
+    # should stop the reply from being picked up and acted on.
+    _post(findings=[], context=_ctx(changed_paths=["unrelated.py"]))
+
+    assert fp in captured["fingerprints"]  # reconstructed and handed to recuration
+    assert resolved == ["T1"]  # dropped via reply -> resolved despite a.py not being touched
+
+
+def test_reply_on_fingerprint_with_no_posted_comment_does_not_raise(monkeypatch):
+    """A reply's fingerprint should always match an already-posted comment
+    in practice -- but if it somehow doesn't, reconstruction must be
+    skipped rather than raising."""
+    pr = _fake_pr([None])
+    _patch_github(monkeypatch, pr)
+    monkeypatch.setattr(
+        ghmod, "thread_replies_by_fingerprint", lambda threads: {"deadbeefdead": ["a reply"]}
+    )
+
+    _post(findings=[])  # should not raise
+
+
+def test_reconstruct_finding_parses_posted_comment_body():
+    f = _finding(2)
+    comment = MagicMock()
+    comment.body = ghmod._comment_body(f)
+    comment.path = "a.py"
+    comment.line = 2
+
+    reconstructed = ghmod._reconstruct_finding(comment)
+
+    assert reconstructed is not None
+    assert reconstructed.file == "a.py"
+    assert reconstructed.line == 2
+    assert reconstructed.lens == f.lens
+    assert reconstructed.confidence == f.confidence
+    assert reconstructed.summary == f.summary
+    assert reconstructed.detail == f.detail
+    assert reconstructed.status == "kept"
+
+
+def test_reconstruct_finding_returns_none_for_unparseable_body():
+    comment = MagicMock()
+    comment.body = "<!-- argus:fp:aaaaaaaaaaaa -->\nnot in the expected format at all"
+    comment.path = "a.py"
+    comment.line = 1
+
+    assert ghmod._reconstruct_finding(comment) is None
 
 
 def test_recuration_skipped_when_no_replies(monkeypatch):

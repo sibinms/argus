@@ -10,7 +10,10 @@ acts as a moderator instead:
   new stays visibly silent rather than editing something old in place.
 - A finding still flagged but with a reply on its thread from someone other
   than Argus is sent back through the curator with that reply as context,
-  so a human explaining why it doesn't apply can change the verdict.
+  so a human explaining why it doesn't apply can change the verdict. Under
+  incremental review this run's own findings may not include it at all (its
+  file might be outside this run's diff scope) — when that happens it's
+  rebuilt from its own posted comment instead of being silently ignored.
 - When a finding is no longer raised (it was addressed), its inline thread is
   resolved rather than left open.
 - Findings that can't anchor to a diff line (GitHub only accepts inline
@@ -35,6 +38,7 @@ import urllib.request
 from github import Github
 from github.GithubException import GithubException
 from github.PullRequest import ReviewComment
+from github.PullRequestComment import PullRequestComment
 
 from argus.config import PostingConfig
 from argus.context.gather import Context
@@ -107,17 +111,50 @@ def commentable_lines(pr) -> dict[str, set[int]]:
     return result
 
 
-def _posted_fingerprints(pr) -> dict[str, str]:
+def _posted_inline_comments(pr) -> dict[str, PullRequestComment]:
     """Maps each fingerprint Argus has already posted as an inline comment on
-    this PR to the file it's anchored to — the file is what lets a later run
-    decide whether it's safe to treat a no-longer-raised finding as
-    addressed (see post_to_github's addressed_fps)."""
-    posted: dict[str, str] = {}
+    this PR to that comment itself — the file (for post_to_github's
+    addressed_fps) and the rendered body (for reconstructing a stale reply
+    target, see _reconstruct_finding) both come from here."""
+    posted: dict[str, PullRequestComment] = {}
     for comment in pr.get_review_comments():
         match = _FP_MARKER.search(comment.body or "")
         if match:
-            posted[match.group(1)] = comment.path
+            posted[match.group(1)] = comment
     return posted
+
+
+_COMMENT_HEADER_RE = re.compile(
+    r"\*\*(?P<summary>.+)\*\* \*\(lens: (?P<lens>[^,]+), confidence: (?P<confidence>\w+)\)\*"
+)
+
+
+def _reconstruct_finding(comment: PullRequestComment) -> Finding | None:
+    """Rebuilds a Finding from its own already-posted inline comment.
+
+    Reply-driven re-judgment (recurate_with_replies) needs a Finding object
+    to re-curate — but under incremental review, a finding with a fresh
+    reply may not be rediscovered by *this* run's (possibly empty) diff at
+    all, since the file it's on might not be in scope this time. Without
+    this, that reply would just be silently ignored: recurate_with_replies
+    only ever looks at findings the current run actually produced. Rebuilt
+    from the comment's own rendered text (see _comment_body) — best-effort,
+    since only what that text captured is recoverable."""
+    body = comment.body or ""
+    without_marker = _FP_MARKER.sub("", body, count=1).strip()
+    header, _, detail = without_marker.partition("\n")
+    match = _COMMENT_HEADER_RE.search(header)
+    if not match:
+        return None
+    return Finding(
+        lens=match.group("lens"),
+        file=comment.path,
+        line=comment.line,
+        summary=match.group("summary"),
+        detail=detail.strip(),
+        confidence=match.group("confidence"),
+        status="kept",
+    )
 
 
 def _posted_overflow_fingerprints(pr) -> set[str]:
@@ -343,12 +380,32 @@ def post_to_github(
     # need the same review-thread data, so share the one GraphQL round-trip
     # instead of each making their own.
     threads = _fetch_review_threads(repo_full_name, pr_number, token)
+    posted_inline = _posted_inline_comments(pr)
 
     # A finding still flagged but with a reply on its thread (from someone
     # other than Argus) gets re-judged with that reply as context, before
-    # anything else decides what's new/addressed this run.
+    # anything else decides what's new/addressed this run. Under incremental
+    # review this run's `findings` may not include a replied-to finding at
+    # all — its file might be outside this run's (possibly empty) diff scope
+    # even though the reply is brand new. Without rebuilding it here, that
+    # reply would just be silently ignored, since recurate_with_replies can
+    # only re-judge findings it's actually given.
     replies = thread_replies_by_fingerprint(threads)
-    findings = recurate_with_replies(findings, replies, context, curator_model)
+    current_fps = {_fingerprint(f) for f in findings}
+    stale_targets: list[Finding] = []
+    for fp in replies:
+        if fp in current_fps or fp not in posted_inline:
+            continue
+        reconstructed = _reconstruct_finding(posted_inline[fp])
+        if reconstructed is not None:
+            stale_targets.append(reconstructed)
+    combined = findings + stale_targets
+    recurate_with_replies(combined, replies, context, curator_model)
+    # recurate_with_replies mutates the Finding objects it's given in place
+    # (see _apply_decision), so `findings` already reflects any change to
+    # findings this run produced fresh — stale_targets' statuses below
+    # reflect the same in-place mutation for the reconstructed ones.
+    reply_addressed_fps = {_fingerprint(f) for f in stale_targets if f.status == "dropped"}
 
     anchorable = commentable_lines(pr)
     postable = postable_findings(findings, posting)
@@ -366,8 +423,7 @@ def post_to_github(
     # force-push, or the reverse), so both "new" checks below use this same
     # union — otherwise a finding posted on one surface could be posted
     # again on the other.
-    posted_fp_files = _posted_fingerprints(pr)
-    posted_fps = set(posted_fp_files)
+    posted_fps = set(posted_inline)
     overflow_posted_fps = _posted_overflow_fingerprints(pr)
     all_posted_fps = posted_fps | overflow_posted_fps
 
@@ -379,14 +435,17 @@ def post_to_github(
     # PR) that alone isn't enough: a finding on a file this run never looked
     # at would also be "absent" simply because nothing re-examined it, not
     # because it's fixed. So a finding is only ever eligible to be marked
-    # addressed if its file was actually in this run's diff scope.
+    # addressed if its file was actually in this run's diff scope — *unless*
+    # a reply already got it dropped above (reply_addressed_fps), which is
+    # fresh evidence in its own right, independent of whether this run's
+    # diff happened to touch that file.
     all_current_fps = {_fingerprint(f) for f in inline_findings} | {
         _fingerprint(f) for f in overflow_findings
     }
     touched_paths = set(context.changed_paths)
     addressed_fps = {
-        fp for fp in posted_fps - all_current_fps if posted_fp_files.get(fp) in touched_paths
-    }
+        fp for fp in posted_fps - all_current_fps if posted_inline[fp].path in touched_paths
+    } | reply_addressed_fps
 
     new_inline = _new_findings_sorted(inline_findings, all_posted_fps)
 
