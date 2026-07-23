@@ -283,6 +283,20 @@ def fetch_thread_replies(repo_full_name: str, pr_number: int, token: str) -> dic
         return {}
 
 
+def _new_findings_sorted(
+    candidates: list[Finding], posted_fps: set[str]
+) -> tuple[list[Finding], set[str]]:
+    """New findings from `candidates` (not already posted, keyed by
+    fingerprint), sorted highest-confidence first — plus the fingerprints
+    no longer present in `candidates` (addressed since the last run). Shared
+    between inline and overflow, which otherwise repeat this exact pattern."""
+    current_fps = {_fingerprint(f) for f in candidates}
+    new_fps, addressed_fps = partition_findings(current_fps, posted_fps)
+    new = [f for f in candidates if _fingerprint(f) in new_fps]
+    new.sort(key=lambda f: _CONFIDENCE_RANK.get(f.confidence, 0), reverse=True)
+    return new, addressed_fps
+
+
 def post_to_github(
     repo_full_name: str,
     pr_number: int,
@@ -313,15 +327,10 @@ def post_to_github(
         else:
             overflow_findings.append(f)
 
-    current_fps = {_fingerprint(f) for f in inline_findings}
     posted_fps = _posted_fingerprints(pr)
-    new_fps, addressed_fps = partition_findings(current_fps, posted_fps)
+    new_inline, addressed_fps = _new_findings_sorted(inline_findings, posted_fps)
 
-    # New findings not already on the PR, highest confidence first...
-    new_inline = [f for f in inline_findings if _fingerprint(f) in new_fps]
-    new_inline.sort(key=lambda f: _CONFIDENCE_RANK.get(f.confidence, 0), reverse=True)
-
-    # ...limited by the hard lifetime cap. Once the PR already carries
+    # Limited by the hard lifetime cap. Once the PR already carries
     # max_inline_comments Argus comments, no more are posted inline. This is
     # what makes "endless comments" impossible regardless of dedup. A finding
     # that's bumped by the cap isn't lost — it falls into the overflow
@@ -340,19 +349,14 @@ def post_to_github(
     # treatment, just via a small standalone comment instead of an inline
     # thread, posted only when there's something new to say there.
     overflow_candidates = overflow_findings + bumped_by_cap
-    overflow_current_fps = {_fingerprint(f) for f in overflow_candidates}
     overflow_posted_fps = _posted_overflow_fingerprints(pr)
-    overflow_new_fps, _ = partition_findings(overflow_current_fps, overflow_posted_fps)
-    new_overflow = [f for f in overflow_candidates if _fingerprint(f) in overflow_new_fps]
-    new_overflow.sort(key=lambda f: _CONFIDENCE_RANK.get(f.confidence, 0), reverse=True)
+    new_overflow, _ = _new_findings_sorted(overflow_candidates, overflow_posted_fps)
     if new_overflow:
-        try:
-            pr.create_issue_comment(_overflow_comment_body(new_overflow))
-        except GithubException:
-            # Non-fatal: an inline-postable finding this run, or the formal
-            # review below, still gets through. Log it rather than silently
-            # losing the overflow findings with no signal at all.
-            logger.warning("failed to post the overflow comment", exc_info=True)
+        # Deliberately not caught: a failure here means real findings didn't
+        # reach the PR at all, which should fail the run loudly rather than
+        # be logged and quietly dropped (unlike fetch_thread_replies, which
+        # is a best-effort enhancement on top of posting, not posting itself).
+        pr.create_issue_comment(_overflow_comment_body(new_overflow))
 
     v = verdict(findings, posting)
     if v == "approve":
@@ -371,7 +375,12 @@ def post_to_github(
     if not new_comments and not new_overflow and event == _last_bot_event(pr):
         return
 
-    review_body = header
+    if overflow_findings or bumped_by_cap:
+        review_body = f"{header} — see the inline and overflow comments below."
+    elif inline_findings:
+        review_body = f"{header} — see the inline comments below."
+    else:
+        review_body = header
     try:
         pr.create_review(body=review_body, event=event, comments=new_comments)
     except GithubException as e:

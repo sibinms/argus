@@ -109,6 +109,8 @@ def test_inline_comments_are_capped(monkeypatch):
 
     posted = pr.create_review.call_args_list[0].kwargs["comments"]
     assert len(posted) == 1  # two new findings, but the cap holds it to one
+    # same confidence, so the cap keeps whichever came first in the list
+    assert "issue one" in posted[0]["body"]
 
 
 def test_finding_bumped_by_cap_lands_in_overflow_not_lost(monkeypatch):
