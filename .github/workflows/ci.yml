@@ -91,7 +91,7 @@ jobs:
         run: pip install -e ".[dev]"
       - name: Run recall eval against seed bugs
         env:
-          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-          ARGUS_EVAL_LENS_MODEL: gemini/gemini-3.5-flash
-          ARGUS_EVAL_CURATOR_MODEL: gemini/gemini-3.5-flash
+          DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+          ARGUS_EVAL_LENS_MODEL: deepseek/deepseek-v4-flash
+          ARGUS_EVAL_CURATOR_MODEL: deepseek/deepseek-v4-pro
         run: python eval/run_eval.py

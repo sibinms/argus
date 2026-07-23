@@ -4,18 +4,17 @@
 # Switch to shadow to get a job-summary report without commenting.
 mode: active
 
-# Gemini free tier (matches the GEMINI_API_KEY passed by the workflow).
-# Both on flash to stay comfortably inside free-tier limits while dogfooding;
-# bump the curator to gemini/gemini-3.1-pro-preview for stronger judgment if
-# your tier allows. To use another provider, change these model strings and
-# pass that provider's key via the workflow's env: block instead.
-#
-# Google deprecates Gemini model names on its own schedule (sometimes ahead
-# of the announced date) — if these start 404ing, check
-# https://ai.google.dev/gemini-api/docs/deprecations for the current list.
+# DeepSeek (matches the DEEPSEEK_API_KEY passed by the workflow). Switched
+# off Gemini's free tier, which 429/503'd under this repo's own parallel
+# -lens load (the planner + 8 lenses + curator fire up to ~10 concurrent
+# calls per run) — a paid key gets a real rate limit instead of a free-tier
+# trickle, and DeepSeek is cheap enough that this barely matters on cost.
+# Flash for the lens (cheap, over-report), Pro for the curator (stronger
+# judgment). To use another provider, change these model strings and pass
+# that provider's key via the workflow's env: block instead.
 models:
-  lens: gemini/gemini-3.5-flash
-  curator: gemini/gemini-3.5-flash
+  lens: deepseek/deepseek-v4-flash
+  curator: deepseek/deepseek-v4-pro
 
 lenses:
   - security
