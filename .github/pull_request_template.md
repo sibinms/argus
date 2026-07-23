@@ -5,6 +5,7 @@
 ## Test plan
 
 - [ ] `ruff check src tests eval scripts` and `ruff format --check src tests eval scripts`
+- [ ] `python scripts/check_readme_version.py`
 - [ ] `mypy src`
 - [ ] `bandit -r src && pip-audit --skip-editable`
 - [ ] `pytest`
