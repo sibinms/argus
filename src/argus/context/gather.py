@@ -9,7 +9,7 @@ GitHub Action against a real pull request.
 from __future__ import annotations
 
 import subprocess  # nosec B404 - only used to shell out to git with a fixed argv list
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from argus.config import ContextConfig
 from argus.context.budget import apply_budget, is_ignored
@@ -29,6 +29,11 @@ class Context:
     pr_title: str = ""
     pr_body: str = ""
     pr_summary: str = ""  # planner output; injected into every lens's context
+    # Every path in this run's diff scope, *before* budget trims changed_files
+    # down to max_files — posting uses this to know which files were actually
+    # looked at this run, so it doesn't resolve a thread for a finding whose
+    # file was never re-examined (see gather_github's since_sha).
+    changed_paths: list[str] = field(default_factory=list)
 
 
 def _read_file(path: str) -> str | None:
@@ -74,13 +79,23 @@ def gather_local(base_ref: str, head_ref: str, config: ContextConfig) -> Context
     files = [ChangedFile(path=p, content=_read_file(p)) for p in changed_paths]
     files = apply_budget(files, config)
 
-    return Context(diff=diff, changed_files=files)
+    return Context(diff=diff, changed_files=files, changed_paths=changed_paths)
 
 
 def gather_github(
-    repo_full_name: str, pr_number: int, token: str, config: ContextConfig
+    repo_full_name: str,
+    pr_number: int,
+    token: str,
+    config: ContextConfig,
+    since_sha: str | None = None,
 ) -> Context:
-    """Pulls the diff, changed files, and PR description from the GitHub API."""
+    """Pulls the diff, changed files, and PR description from the GitHub API.
+
+    since_sha, when given, scopes the diff to since_sha...head instead of the
+    PR's full base...head — a re-review after a small fixup commit then only
+    costs what that commit actually changed, not the whole PR again. Falls
+    back to the full base diff if since_sha can't be compared (e.g. a
+    force-push rewrote it out of the branch's history)."""
     from github import Github
     from github.GithubException import GithubException
 
@@ -88,9 +103,18 @@ def gather_github(
     repo = gh.get_repo(repo_full_name)
     pr = repo.get_pull(pr_number)
 
+    pr_files = None
+    if since_sha:
+        try:
+            pr_files = list(repo.compare(since_sha, pr.head.sha).files)
+        except GithubException:
+            pr_files = None
+    if pr_files is None:
+        pr_files = list(pr.get_files())
+
     diff_parts = []
     files = []
-    for pr_file in pr.get_files():
+    for pr_file in pr_files:
         if not is_ignored(pr_file.filename, config.ignore_globs):
             diff_parts.append(pr_file.patch or "")
         content = None
@@ -105,6 +129,7 @@ def gather_github(
             content = None
         files.append(ChangedFile(path=pr_file.filename, content=content))
 
+    changed_paths = [pr_file.filename for pr_file in pr_files]
     files = apply_budget(files, config)
 
     return Context(
@@ -112,4 +137,5 @@ def gather_github(
         changed_files=files,
         pr_title=pr.title or "",
         pr_body=pr.body or "",
+        changed_paths=changed_paths,
     )

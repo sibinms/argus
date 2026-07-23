@@ -10,8 +10,8 @@ from argus.posting import github as ghmod
 from argus.posting.github import _fingerprint, _patch_new_lines, commentable_lines
 
 
-def _ctx() -> Context:
-    return Context(diff="+x", changed_files=[])
+def _ctx(changed_paths=None) -> Context:
+    return Context(diff="+x", changed_files=[], changed_paths=changed_paths or ["a.py"])
 
 
 def _finding(line: int) -> Finding:
@@ -205,6 +205,60 @@ def test_finding_relocated_to_overflow_does_not_resolve_its_inline_thread(monkey
     _post(findings=[orphaned])
 
     assert resolved == []  # still current (in overflow) -> thread stays open
+
+
+def test_addressed_finding_resolves_when_its_file_was_touched_this_run(monkeypatch):
+    """A finding no longer raised, whose file WAS in this run's diff scope,
+    is genuinely fixed -- its thread should resolve."""
+    f = _finding(2)
+    fp = _fingerprint(f)
+    existing = MagicMock()
+    existing.body = f"<!-- argus:fp:{fp} -->\npreviously posted"
+    existing.path = "a.py"
+    pr = _fake_pr(posted_comments=[existing])
+    _patch_github(monkeypatch, pr)
+    monkeypatch.setattr(
+        ghmod,
+        "_fetch_review_threads",
+        lambda *a, **k: [
+            {"id": "T1", "isResolved": False, "firstBody": existing.body, "comments": []}
+        ],
+    )
+    resolved: list[str] = []
+    monkeypatch.setattr(ghmod, "_graphql_resolve_thread", lambda tid, tok: resolved.append(tid))
+
+    # default _ctx() has changed_paths=["a.py"] -- in scope this run, and the
+    # finding is simply absent from the (empty) findings list -> fixed.
+    _post(findings=[])
+
+    assert resolved == ["T1"]
+
+
+def test_addressed_finding_does_not_resolve_when_its_file_was_untouched_this_run(monkeypatch):
+    """A finding absent from this run's results doesn't mean it's fixed if
+    this run's diff scope never even looked at its file -- e.g. an
+    incremental re-review that only covers the latest push. Its thread must
+    stay open rather than being wrongly marked addressed."""
+    f = _finding(2)
+    fp = _fingerprint(f)
+    existing = MagicMock()
+    existing.body = f"<!-- argus:fp:{fp} -->\npreviously posted"
+    existing.path = "b.py"  # not touched this run
+    pr = _fake_pr(posted_comments=[existing])
+    _patch_github(monkeypatch, pr)
+    monkeypatch.setattr(
+        ghmod,
+        "_fetch_review_threads",
+        lambda *a, **k: [
+            {"id": "T1", "isResolved": False, "firstBody": existing.body, "comments": []}
+        ],
+    )
+    resolved: list[str] = []
+    monkeypatch.setattr(ghmod, "_graphql_resolve_thread", lambda tid, tok: resolved.append(tid))
+
+    _post(findings=[], context=_ctx(changed_paths=["a.py"]))  # b.py out of scope
+
+    assert resolved == []
 
 
 def test_finding_on_non_diff_line_goes_to_overflow_comment(monkeypatch):
@@ -420,6 +474,76 @@ def test_resolve_addressed_swallows_api_errors(monkeypatch, caplog):
     with caplog.at_level("WARNING"):
         ghmod._resolve_addressed_threads(threads, "tok", {"aaaaaaaaaaaa"})
     assert "failed to resolve addressed review threads" in caplog.text
+
+
+# ---- last reviewed sha ----
+
+
+def _reviews_pr(reviews):
+    pr = MagicMock()
+    pr.get_reviews.return_value = reviews
+    return pr
+
+
+def test_last_reviewed_sha_reads_marker_from_most_recent_argus_review(monkeypatch):
+    older = MagicMock()
+    older.body = f"❌ **Argus** — changes requested\n\n<!-- argus:reviewed-sha:{'a' * 40} -->"
+    newer = MagicMock()
+    newer.body = f"✅ **Argus** — looks good\n\n<!-- argus:reviewed-sha:{'b' * 40} -->"
+    pr = _reviews_pr([older, newer])
+    repo = MagicMock()
+    repo.get_pull.return_value = pr
+    gh = MagicMock()
+    gh.get_repo.return_value = repo
+    monkeypatch.setattr(ghmod, "Github", lambda *a, **k: gh)
+
+    assert ghmod.last_reviewed_sha("o/r", 1, "tok") == "b" * 40
+
+
+def test_last_reviewed_sha_ignores_non_argus_reviews(monkeypatch):
+    human = MagicMock()
+    human.body = f"looks fine to me <!-- argus:reviewed-sha:{'a' * 40} -->"
+    pr = _reviews_pr([human])
+    repo = MagicMock()
+    repo.get_pull.return_value = pr
+    gh = MagicMock()
+    gh.get_repo.return_value = repo
+    monkeypatch.setattr(ghmod, "Github", lambda *a, **k: gh)
+
+    assert ghmod.last_reviewed_sha("o/r", 1, "tok") is None
+
+
+def test_last_reviewed_sha_returns_none_when_no_reviews(monkeypatch):
+    pr = _reviews_pr([])
+    repo = MagicMock()
+    repo.get_pull.return_value = pr
+    gh = MagicMock()
+    gh.get_repo.return_value = repo
+    monkeypatch.setattr(ghmod, "Github", lambda *a, **k: gh)
+
+    assert ghmod.last_reviewed_sha("o/r", 1, "tok") is None
+
+
+def test_last_reviewed_sha_swallows_errors(monkeypatch, caplog):
+    def boom(*a, **k):
+        raise RuntimeError("down")
+
+    monkeypatch.setattr(ghmod, "Github", boom)
+
+    with caplog.at_level("WARNING"):
+        assert ghmod.last_reviewed_sha("o/r", 1, "tok") is None
+    assert "failed to read last-reviewed SHA" in caplog.text
+
+
+def test_post_to_github_stamps_reviewed_sha_into_the_review_body(monkeypatch):
+    pr = _fake_pr([None])
+    pr.head.sha = "d" * 40
+    _patch_github(monkeypatch, pr)
+
+    _post(findings=[_finding(2)])
+
+    body = pr.create_review.call_args_list[0].kwargs["body"]
+    assert f"<!-- argus:reviewed-sha:{'d' * 40} -->" in body
 
 
 # ---- thread replies ----

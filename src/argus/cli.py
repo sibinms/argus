@@ -12,7 +12,7 @@ from argus.config import DEFAULT_CONFIG_PATH, load_config
 from argus.context.gather import gather_github, gather_local
 from argus.github_app import get_installation_token
 from argus.pipeline import run_review
-from argus.posting.github import post_to_github
+from argus.posting.github import last_reviewed_sha, post_to_github
 from argus.posting.shadow import write_shadow_report
 
 
@@ -118,7 +118,8 @@ def review(
                 raise click.ClickException(
                     "Set GITHUB_TOKEN, or GITHUB_APP_ID + GITHUB_APP_PRIVATE_KEY for App auth."
                 )
-        context = gather_github(repo, pr_number, token, config.context)
+        since_sha = last_reviewed_sha(repo, pr_number, token)
+        context = gather_github(repo, pr_number, token, config.context, since_sha=since_sha)
     else:
         context = gather_local(base, head, config.context)
 

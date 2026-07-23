@@ -97,6 +97,113 @@ def test_gather_github_excludes_ignored_files_from_the_diff_itself(monkeypatch):
     assert "lockfile noise" not in ctx.diff
 
 
+def test_gather_github_scopes_to_since_sha_when_given(monkeypatch):
+    """With since_sha, the diff should come from repo.compare(since_sha,
+    head) instead of the PR's full base...head diff."""
+    changed = MagicMock()
+    changed.filename = "a.py"
+    changed.patch = "@@ -1 +1 @@\n+incremental change\n"
+
+    pr = MagicMock()
+    pr.title = "t"
+    pr.body = "b"
+    pr.head.sha = "headsha"
+    pr.get_files.return_value = [MagicMock(filename="full-diff-only.py", patch="+full")]
+
+    comparison = MagicMock()
+    comparison.files = [changed]
+    repo = MagicMock()
+    repo.get_pull.return_value = pr
+    repo.compare.return_value = comparison
+    repo.get_contents.side_effect = GithubException(404, data={}, headers=None)
+
+    gh = MagicMock()
+    gh.get_repo.return_value = repo
+    monkeypatch.setattr(github, "Github", lambda *a, **k: gh)
+
+    ctx = gather_github("o/r", 1, "tok", ContextConfig(), since_sha="oldsha")
+
+    repo.compare.assert_called_once_with("oldsha", "headsha")
+    assert ctx.changed_paths == ["a.py"]
+    assert "incremental change" in ctx.diff
+    pr.get_files.assert_not_called()
+
+
+def test_gather_github_falls_back_to_full_diff_when_compare_fails(monkeypatch):
+    """A since_sha that's no longer reachable (e.g. a force-push rewrote it
+    out of history) shouldn't break the run -- fall back to the full PR
+    diff, same as having no since_sha at all."""
+    changed = MagicMock()
+    changed.filename = "a.py"
+    changed.patch = "@@ -1 +1 @@\n+full change\n"
+
+    pr = MagicMock()
+    pr.title = "t"
+    pr.body = "b"
+    pr.head.sha = "headsha"
+    pr.get_files.return_value = [changed]
+
+    repo = MagicMock()
+    repo.get_pull.return_value = pr
+    repo.compare.side_effect = GithubException(404, data={}, headers=None)
+    repo.get_contents.side_effect = GithubException(404, data={}, headers=None)
+
+    gh = MagicMock()
+    gh.get_repo.return_value = repo
+    monkeypatch.setattr(github, "Github", lambda *a, **k: gh)
+
+    ctx = gather_github("o/r", 1, "tok", ContextConfig(), since_sha="gone-sha")
+
+    assert ctx.changed_paths == ["a.py"]
+    assert "full change" in ctx.diff
+
+
+def test_gather_github_without_since_sha_uses_full_diff(monkeypatch):
+    changed = MagicMock()
+    changed.filename = "a.py"
+    changed.patch = "@@ -1 +1 @@\n+x\n"
+
+    pr = MagicMock()
+    pr.title = "t"
+    pr.body = "b"
+    pr.head.sha = "headsha"
+    pr.get_files.return_value = [changed]
+
+    repo = MagicMock()
+    repo.get_pull.return_value = pr
+    repo.get_contents.side_effect = GithubException(404, data={}, headers=None)
+
+    gh = MagicMock()
+    gh.get_repo.return_value = repo
+    monkeypatch.setattr(github, "Github", lambda *a, **k: gh)
+
+    ctx = gather_github("o/r", 1, "tok", ContextConfig())
+
+    repo.compare.assert_not_called()
+    assert ctx.changed_paths == ["a.py"]
+
+
+def test_gather_local_sets_changed_paths(tmp_path, monkeypatch):
+    def run(*args):
+        subprocess.run(["git", *args], cwd=tmp_path, check=True, capture_output=True)
+
+    run("init", "-q")
+    run("config", "user.email", "t@example.com")
+    run("config", "user.name", "t")
+    (tmp_path / "app.py").write_text("old\n")
+    run("add", "app.py")
+    run("commit", "-qm", "init")
+    run("branch", "base")
+    (tmp_path / "app.py").write_text("new\n")
+    run("add", "app.py")
+    run("commit", "-qm", "change")
+
+    monkeypatch.chdir(tmp_path)
+    ctx = gather_local("base", "HEAD", ContextConfig())
+
+    assert ctx.changed_paths == ["app.py"]
+
+
 def test_gather_local_excludes_ignored_files_from_the_diff_itself(tmp_path, monkeypatch):
     def run(*args):
         subprocess.run(["git", *args], cwd=tmp_path, check=True, capture_output=True)

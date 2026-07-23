@@ -20,6 +20,9 @@ acts as a moderator instead:
   (a new inline/overflow comment, or a changed verdict) — otherwise Argus
   stays quiet. Nothing is ever deleted — comments are resolved (collapsed),
   never removed.
+- Every posted review is stamped with a hidden marker recording the commit
+  SHA it was run against (last_reviewed_sha reads it back), so the next run
+  can diff only what's changed since then instead of the whole PR again.
 """
 
 from __future__ import annotations
@@ -60,6 +63,7 @@ _VERDICT_HEADER = {
 _HUNK_HEADER = re.compile(r"^@@ -\d+(?:,\d+)? \+(\d+)")
 _OVERFLOW_MARKER = "<!-- argus:overflow -->"
 _FP_MARKER = re.compile(r"<!-- argus:fp:([0-9a-f]{12}) -->")
+_REVIEWED_SHA_MARKER = re.compile(r"<!-- argus:reviewed-sha:([0-9a-f]{40}) -->")
 
 
 _CONFIDENCE_RANK = {"low": 0, "medium": 1, "high": 2}
@@ -103,13 +107,16 @@ def commentable_lines(pr) -> dict[str, set[int]]:
     return result
 
 
-def _posted_fingerprints(pr) -> set[str]:
-    """Fingerprints Argus has already posted as inline comments on this PR."""
-    posted: set[str] = set()
+def _posted_fingerprints(pr) -> dict[str, str]:
+    """Maps each fingerprint Argus has already posted as an inline comment on
+    this PR to the file it's anchored to — the file is what lets a later run
+    decide whether it's safe to treat a no-longer-raised finding as
+    addressed (see post_to_github's addressed_fps)."""
+    posted: dict[str, str] = {}
     for comment in pr.get_review_comments():
         match = _FP_MARKER.search(comment.body or "")
         if match:
-            posted.add(match.group(1))
+            posted[match.group(1)] = comment.path
     return posted
 
 
@@ -170,6 +177,30 @@ def _last_bot_event(pr) -> str | None:
             if mapped:
                 last = mapped
     return last
+
+
+def last_reviewed_sha(repo_full_name: str, pr_number: int, token: str) -> str | None:
+    """The commit SHA Argus's most recent formal review was posted against,
+    read back from a hidden marker in that review's body. Lets a later run
+    diff only what's changed since then instead of re-diffing the whole PR
+    again. Returns None (fall back to a full base diff) if Argus has never
+    reviewed here, or the lookup itself fails."""
+    try:
+        gh = Github(token, timeout=30)
+        repo = gh.get_repo(repo_full_name)
+        pr = repo.get_pull(pr_number)
+        last_sha: str | None = None
+        for review in pr.get_reviews():
+            body = review.body or ""
+            if "**Argus**" not in body:
+                continue
+            match = _REVIEWED_SHA_MARKER.search(body)
+            if match:
+                last_sha = match.group(1)
+        return last_sha
+    except Exception:
+        logger.warning("failed to read last-reviewed SHA", exc_info=True)
+        return None
 
 
 def _resolve_addressed_threads(threads: list[dict], token: str, addressed_fps: set[str]) -> None:
@@ -335,18 +366,27 @@ def post_to_github(
     # force-push, or the reverse), so both "new" checks below use this same
     # union — otherwise a finding posted on one surface could be posted
     # again on the other.
-    posted_fps = _posted_fingerprints(pr)
+    posted_fp_files = _posted_fingerprints(pr)
+    posted_fps = set(posted_fp_files)
     overflow_posted_fps = _posted_overflow_fingerprints(pr)
     all_posted_fps = posted_fps | overflow_posted_fps
 
     # A previously-inline finding only counts as "addressed" (safe to
     # resolve its thread) if it's absent from *both* surfaces this run —
     # not just no longer inline, since it may have simply relocated to
-    # overflow rather than actually being fixed.
+    # overflow rather than actually being fixed. Under incremental review
+    # (context.changed_paths is scoped to since_sha...head, not the whole
+    # PR) that alone isn't enough: a finding on a file this run never looked
+    # at would also be "absent" simply because nothing re-examined it, not
+    # because it's fixed. So a finding is only ever eligible to be marked
+    # addressed if its file was actually in this run's diff scope.
     all_current_fps = {_fingerprint(f) for f in inline_findings} | {
         _fingerprint(f) for f in overflow_findings
     }
-    addressed_fps = posted_fps - all_current_fps
+    touched_paths = set(context.changed_paths)
+    addressed_fps = {
+        fp for fp in posted_fps - all_current_fps if posted_fp_files.get(fp) in touched_paths
+    }
 
     new_inline = _new_findings_sorted(inline_findings, all_posted_fps)
 
@@ -384,6 +424,12 @@ def post_to_github(
     # Submit a formal review only when there is something new to say: a new
     # inline or overflow comment, or a verdict that differs from Argus's last
     # review. Otherwise stay quiet instead of stacking an identical review.
+    #
+    # Known trade-off: the reviewed-sha marker below only advances when a
+    # review is actually posted, so a string of no-op runs (nothing new,
+    # same verdict) doesn't advance it either. That's fine — the next run
+    # just diffs a slightly wider (but still bounded) range, and any run
+    # that does post immediately snaps the marker back to the true head.
     if not new_comments and not new_overflow and event == _last_bot_event(pr):
         return
 
@@ -393,6 +439,7 @@ def post_to_github(
         review_body = f"{header} — see the inline comments below."
     else:
         review_body = header
+    review_body = f"{review_body}\n\n<!-- argus:reviewed-sha:{pr.head.sha} -->"
     try:
         pr.create_review(body=review_body, event=event, comments=new_comments)
     except GithubException as e:
