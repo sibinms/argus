@@ -4,24 +4,28 @@ Argus runs on every push, so naive posting stacks a fresh review and a fresh
 copy of every comment each time, and never resolves anything. This module
 acts as a moderator instead:
 
-- One rolling **summary** comment, edited in place across runs (never stacked).
-- Each finding is fingerprinted and posted as an inline comment **once**;
-  a finding already posted is not posted again.
+- Findings attach as **inline comments** on their diff line — no rolling
+  summary comment. Each finding is fingerprinted and posted **once**; a
+  finding already posted is not posted again, so a run that finds nothing
+  new stays visibly silent rather than editing something old in place.
+- A finding still flagged but with a reply on its thread from someone other
+  than Argus is sent back through the curator with that reply as context,
+  so a human explaining why it doesn't apply can change the verdict.
 - When a finding is no longer raised (it was addressed), its inline thread is
   resolved rather than left open.
+- Findings that can't anchor to a diff line (GitHub only accepts inline
+  comments on lines the diff touches) go in a small **overflow** comment
+  instead — same one-time-only posting rule, just not tied to a line.
 - A new formal review is only submitted when there is something new to say
-  (a new inline comment, or a changed verdict) — otherwise Argus stays quiet.
-
-GitHub only accepts an inline comment on a line that is part of the diff, and
-rejects the whole review (422) otherwise, so inline comments are limited to
-diff lines; every finding still appears in the summary. Nothing is ever
-deleted — comments are resolved (collapsed) or edited, never removed.
+  (a new inline/overflow comment, or a changed verdict) — otherwise Argus
+  stays quiet. Nothing is ever deleted — comments are resolved (collapsed),
+  never removed.
 """
 
 from __future__ import annotations
 
-import hashlib
 import json
+import logging
 import re
 import urllib.request
 
@@ -30,8 +34,13 @@ from github.GithubException import GithubException
 from github.PullRequest import ReviewComment
 
 from argus.config import PostingConfig
+from argus.context.gather import Context
+from argus.curator.curate import recurate_with_replies
+from argus.fingerprint import fingerprint as _fingerprint
 from argus.lenses.base import Finding
-from argus.report import postable_findings, render_markdown, verdict
+from argus.report import postable_findings, verdict
+
+logger = logging.getLogger(__name__)
 
 # "approve" is handled separately (see post_to_github): it becomes a real
 # APPROVE only when posting.approve_reviews is on, otherwise a positive
@@ -49,41 +58,16 @@ _VERDICT_HEADER = {
 }
 
 _HUNK_HEADER = re.compile(r"^@@ -\d+(?:,\d+)? \+(\d+)")
-_SUMMARY_MARKER = "<!-- argus:summary -->"
+_OVERFLOW_MARKER = "<!-- argus:overflow -->"
 _FP_MARKER = re.compile(r"<!-- argus:fp:([0-9a-f]{12}) -->")
 
 
 _CONFIDENCE_RANK = {"low": 0, "medium": 1, "high": 2}
 
 
-def _normalize_summary(summary: str) -> str:
-    """Collapse a summary to a stable key: lowercase, drop punctuation and
-    digits, squeeze whitespace. Keeps the fingerprint steady across small
-    wording changes in the model's output."""
-    text = re.sub(r"[^a-z ]+", " ", summary.lower())
-    return re.sub(r"\s+", " ", text).strip()
-
-
-def _fingerprint(f: Finding) -> str:
-    """Stable identity for a finding across runs. Deliberately excludes the
-    line number (it drifts as the PR gains commits) and normalizes the summary
-    (the model rewords it run to run), so the same underlying issue keeps the
-    same fingerprint and is posted at most once."""
-    key = f"{f.file}|{_normalize_summary(f.summary)}"
-    return hashlib.sha1(key.encode("utf-8"), usedforsecurity=False).hexdigest()[:12]
-
-
 def _comment_body(f: Finding) -> str:
     marker = f"<!-- argus:fp:{_fingerprint(f)} -->"
     return f"{marker}\n**{f.summary}** *(lens: {f.lens}, confidence: {f.confidence})*\n\n{f.detail}"
-
-
-def partition_findings(current_fps: set[str], posted_fps: set[str]) -> tuple[set[str], set[str]]:
-    """Split fingerprints into (new, addressed): new findings not yet posted,
-    and previously-posted findings that are no longer raised."""
-    new = current_fps - posted_fps
-    addressed = posted_fps - current_fps
-    return new, addressed
 
 
 def _patch_new_lines(patch: str | None) -> set[int]:
@@ -129,14 +113,40 @@ def _posted_fingerprints(pr) -> set[str]:
     return posted
 
 
-def _upsert_summary(pr, body: str) -> None:
-    """Edit Argus's single summary comment in place, or create it if absent."""
-    full = f"{_SUMMARY_MARKER}\n{body}"
+def _posted_overflow_fingerprints(pr) -> set[str]:
+    """Fingerprints Argus has already surfaced in an overflow comment (a
+    finding that couldn't attach to a diff line)."""
+    posted: set[str] = set()
     for comment in pr.get_issue_comments():
-        if _SUMMARY_MARKER in (comment.body or ""):
-            comment.edit(full)
-            return
-    pr.create_issue_comment(full)
+        body = comment.body or ""
+        if _OVERFLOW_MARKER not in body:
+            continue
+        posted.update(match.group(1) for match in _FP_MARKER.finditer(body))
+    return posted
+
+
+def _overflow_comment_body(findings: list[Finding]) -> str:
+    # Known limitation: unlike inline threads (which get resolved once a
+    # finding is addressed), an overflow comment is never edited after
+    # posting — a finding that's since fixed just stays listed here. Fixing
+    # this properly means either editing the comment in place (reintroducing
+    # the "invisible update" problem the old rolling summary had) or some
+    # new per-finding resolution affordance; punting on both for now since
+    # overflow only covers the minority of findings that can't be inlined.
+    lines = [
+        _OVERFLOW_MARKER,
+        "**Argus** — finding(s) that don't attach to a changed line:",
+        "",
+    ]
+    for f in findings:
+        marker = f"<!-- argus:fp:{_fingerprint(f)} -->"
+        location = f"`{f.file}`" if f.file else "(general)"
+        lines.append(f"{marker}\n### {location} — {f.summary}")
+        lines.append(f"*lens: {f.lens} · confidence: {f.confidence}*")
+        lines.append("")
+        lines.append(f.detail or "")
+        lines.append("")
+    return "\n".join(lines)
 
 
 # GitHub reports a review's *state* (APPROVED / CHANGES_REQUESTED / COMMENTED)
@@ -155,23 +165,21 @@ def _last_bot_event(pr) -> str | None:
     last: str | None = None
     for review in pr.get_reviews():
         body = review.body or ""
-        if _SUMMARY_MARKER in body or "**Argus**" in body:
+        if "**Argus**" in body:
             mapped = _STATE_TO_EVENT.get(review.state)
             if mapped:
                 last = mapped
     return last
 
 
-def _resolve_addressed_threads(
-    repo_full_name: str, pr_number: int, token: str, addressed_fps: set[str]
-) -> None:
+def _resolve_addressed_threads(threads: list[dict], token: str, addressed_fps: set[str]) -> None:
     """Best-effort: collapse (resolve) the review threads whose finding is no
-    longer raised. Uses the GraphQL API; any failure here is non-fatal —
+    longer raised. Takes already-fetched threads (see _fetch_review_threads)
+    rather than fetching its own copy. Any failure here is non-fatal —
     resolution is housekeeping, not part of posting the review."""
     if not addressed_fps:
         return
     try:
-        threads = _graphql_review_threads(repo_full_name, pr_number, token)
         for thread in threads:
             if thread["isResolved"]:
                 continue
@@ -180,8 +188,10 @@ def _resolve_addressed_threads(
             if match and match.group(1) in addressed_fps:
                 _graphql_resolve_thread(thread["id"], token)
     except Exception:
-        # Never let housekeeping break the run.
-        return
+        # Never let housekeeping break the run, but a persistent failure
+        # here means threads silently pile up unresolved forever — worth a
+        # log, same as the other best-effort calls in this module.
+        logger.warning("failed to resolve addressed review threads", exc_info=True)
 
 
 def _graphql(query: str, variables: dict, token: str) -> dict:
@@ -203,7 +213,11 @@ def _graphql_review_threads(repo_full_name: str, pr_number: int, token: str) -> 
       repository(owner:$owner,name:$name){
         pullRequest(number:$number){
           reviewThreads(first:100){
-            nodes{ id isResolved comments(first:1){ nodes{ body } } }
+            nodes{
+              id
+              isResolved
+              comments(first:100){ nodes{ body author{ login } } }
+            }
           }
         }
       }
@@ -218,6 +232,7 @@ def _graphql_review_threads(repo_full_name: str, pr_number: int, token: str) -> 
                 "id": node["id"],
                 "isResolved": node["isResolved"],
                 "firstBody": comments[0]["body"] if comments else "",
+                "comments": comments,
             }
         )
     return threads
@@ -229,68 +244,155 @@ def _graphql_resolve_thread(thread_id: str, token: str) -> None:
     _graphql(mutation, {"id": thread_id}, token)
 
 
+def thread_replies_by_fingerprint(threads: list[dict]) -> dict[str, list[str]]:
+    """Maps a finding's fingerprint to any reply left on its thread by
+    someone other than whoever posted the first comment (i.e. Argus itself,
+    regardless of which identity — PAT, bot account, or GitHub App — posted
+    it). Threads with no reply, or with an unrecognized first comment,
+    aren't included."""
+    replies: dict[str, list[str]] = {}
+    for thread in threads:
+        comments = thread["comments"]
+        if not comments:
+            continue
+        first = comments[0]
+        match = _FP_MARKER.search(first.get("body") or "")
+        if not match:
+            continue
+        fp = match.group(1)
+        first_author = (first.get("author") or {}).get("login")
+        for comment in comments[1:]:
+            author = (comment.get("author") or {}).get("login")
+            body = comment.get("body")
+            if body and author != first_author:
+                replies.setdefault(fp, []).append(body)
+    return replies
+
+
+def _fetch_review_threads(repo_full_name: str, pr_number: int, token: str) -> list[dict]:
+    """Best-effort: the PR's review threads, fetched once and shared by both
+    reply-awareness and addressed-thread resolution — they need the same
+    GraphQL data, so this avoids each making its own round-trip for it. Any
+    failure returns no threads rather than breaking the run; both consumers
+    already treat an empty list as "nothing to do here"."""
+    try:
+        return _graphql_review_threads(repo_full_name, pr_number, token)
+    except Exception:
+        logger.warning("failed to fetch review threads", exc_info=True)
+        return []
+
+
+def _new_findings_sorted(candidates: list[Finding], posted_fps: set[str]) -> list[Finding]:
+    """Findings from `candidates` not already posted (by fingerprint,
+    checked against `posted_fps` — pass the union of inline- and
+    overflow-posted fingerprints so a finding already surfaced on one
+    surface is never posted again on the other), sorted highest-confidence
+    first."""
+    current_fps = {_fingerprint(f) for f in candidates}
+    new_fps = current_fps - posted_fps
+    new = [f for f in candidates if _fingerprint(f) in new_fps]
+    new.sort(key=lambda f: _CONFIDENCE_RANK.get(f.confidence, 0), reverse=True)
+    return new
+
+
 def post_to_github(
     repo_full_name: str,
     pr_number: int,
     token: str,
     findings: list[Finding],
     posting: PostingConfig,
+    context: Context,
+    curator_model: str,
 ) -> None:
     gh = Github(token, timeout=30)
     repo = gh.get_repo(repo_full_name)
     pr = repo.get_pull(pr_number)
 
+    # Fetched once — reply-awareness and addressed-thread resolution both
+    # need the same review-thread data, so share the one GraphQL round-trip
+    # instead of each making their own.
+    threads = _fetch_review_threads(repo_full_name, pr_number, token)
+
+    # A finding still flagged but with a reply on its thread (from someone
+    # other than Argus) gets re-judged with that reply as context, before
+    # anything else decides what's new/addressed this run.
+    replies = thread_replies_by_fingerprint(threads)
+    findings = recurate_with_replies(findings, replies, context, curator_model)
+
     anchorable = commentable_lines(pr)
     postable = postable_findings(findings, posting)
 
-    inline_findings = [
-        f
-        for f in postable
-        if f.file is not None and f.line is not None and f.line in anchorable.get(f.file, set())
-    ]
-    current_fps = {_fingerprint(f) for f in inline_findings}
+    inline_findings: list[Finding] = []
+    overflow_findings: list[Finding] = []
+    for f in postable:
+        if f.file is not None and f.line is not None and f.line in anchorable.get(f.file, set()):
+            inline_findings.append(f)
+        else:
+            overflow_findings.append(f)
+
+    # Fingerprints already posted on *either* surface. A finding can move
+    # between surfaces across runs (a line becomes un-anchorable after a
+    # force-push, or the reverse), so both "new" checks below use this same
+    # union — otherwise a finding posted on one surface could be posted
+    # again on the other.
     posted_fps = _posted_fingerprints(pr)
-    new_fps, addressed_fps = partition_findings(current_fps, posted_fps)
+    overflow_posted_fps = _posted_overflow_fingerprints(pr)
+    all_posted_fps = posted_fps | overflow_posted_fps
 
-    # New findings not already on the PR, highest confidence first...
-    new_inline = [
-        f
-        for f in inline_findings
-        if f.file is not None and f.line is not None and _fingerprint(f) in new_fps
-    ]
-    new_inline.sort(key=lambda f: _CONFIDENCE_RANK.get(f.confidence, 0), reverse=True)
+    # A previously-inline finding only counts as "addressed" (safe to
+    # resolve its thread) if it's absent from *both* surfaces this run —
+    # not just no longer inline, since it may have simply relocated to
+    # overflow rather than actually being fixed.
+    all_current_fps = {_fingerprint(f) for f in inline_findings} | {
+        _fingerprint(f) for f in overflow_findings
+    }
+    addressed_fps = posted_fps - all_current_fps
 
-    # ...limited by the hard lifetime cap. Once the PR already carries
-    # max_inline_comments Argus comments, no more are posted inline — the rest
-    # live in the rolling summary. This is what makes "endless comments"
-    # impossible regardless of dedup.
+    new_inline = _new_findings_sorted(inline_findings, all_posted_fps)
+
+    # Limited by the hard lifetime cap. Once the PR already carries
+    # max_inline_comments Argus comments, no more are posted inline. This is
+    # what makes "endless comments" impossible regardless of dedup. A finding
+    # that's bumped by the cap isn't lost — it falls into the overflow
+    # comment below, same as one that never anchors to a line at all.
     budget = max(0, posting.max_inline_comments - len(posted_fps))
+    inline_to_post = new_inline[:budget]
+    bumped_by_cap = new_inline[budget:]
     new_comments: list[ReviewComment] = [
         {"path": f.file, "line": f.line, "side": "RIGHT", "body": _comment_body(f)}
-        for f in new_inline[:budget]
+        for f in inline_to_post
         if f.file is not None and f.line is not None
     ]
+
+    # Findings that can't attach to a diff line — or that could, but didn't
+    # fit under the inline cap — get the same new-vs-already-posted
+    # treatment via a small standalone comment instead of an inline thread.
+    overflow_candidates = overflow_findings + bumped_by_cap
+    new_overflow = _new_findings_sorted(overflow_candidates, all_posted_fps)
 
     v = verdict(findings, posting)
     if v == "approve":
         event = "APPROVE" if posting.approve_reviews else "COMMENT"
     else:
         event = _EVENT_MAP[v]
-
-    # The rolling summary is the always-current conclusion; refresh it every run.
     header = _VERDICT_HEADER[v]
-    _upsert_summary(pr, f"{header}\n\n{render_markdown(findings, posting)}")
 
-    # Resolve threads for findings that have since been addressed.
-    _resolve_addressed_threads(repo_full_name, pr_number, token, addressed_fps)
+    # Resolve threads for findings that have since been addressed (fixed in
+    # the diff, or dismissed by a reply the curator accepted above).
+    _resolve_addressed_threads(threads, token, addressed_fps)
 
     # Submit a formal review only when there is something new to say: a new
-    # inline comment, or a verdict that differs from Argus's last review.
-    # Otherwise stay quiet instead of stacking an identical review.
-    if not new_comments and event == _last_bot_event(pr):
+    # inline or overflow comment, or a verdict that differs from Argus's last
+    # review. Otherwise stay quiet instead of stacking an identical review.
+    if not new_comments and not new_overflow and event == _last_bot_event(pr):
         return
 
-    review_body = f"{header} — details in the Argus summary comment."
+    if overflow_findings or bumped_by_cap:
+        review_body = f"{header} — see the inline and overflow comments below."
+    elif inline_findings:
+        review_body = f"{header} — see the inline comments below."
+    else:
+        review_body = header
     try:
         pr.create_review(body=review_body, event=event, comments=new_comments)
     except GithubException as e:
@@ -308,3 +410,11 @@ def post_to_github(
             pr.create_review(body=review_body, event="COMMENT")
         else:
             raise
+
+    # Posted after the review, deliberately not caught: a failure here means
+    # real findings didn't reach the PR at all, which should fail the run
+    # loudly — but only once the independent, already-successful inline
+    # comments above are safely posted, so an overflow failure doesn't take
+    # those down as collateral damage.
+    if new_overflow:
+        pr.create_issue_comment(_overflow_comment_body(new_overflow))

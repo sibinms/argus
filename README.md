@@ -105,7 +105,7 @@ the workflow, as shown below.
 **Anthropic**
 
 ``` yaml
-- uses: sibinms/argus@v1.2.24
+- uses: sibinms/argus@v1.2.25
   with:
     anthropic-api-key: ${{ secrets.ANTHROPIC_API_KEY }}
 ```
@@ -113,7 +113,7 @@ the workflow, as shown below.
 **OpenAI**
 
 ``` yaml
-- uses: sibinms/argus@v1.2.24
+- uses: sibinms/argus@v1.2.25
   env:
     OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
   with:
@@ -124,18 +124,18 @@ the workflow, as shown below.
 **Gemini**
 
 ``` yaml
-- uses: sibinms/argus@v1.2.24
+- uses: sibinms/argus@v1.2.25
   env:
     GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
   with:
-    lens-model: gemini/gemini-2.5-flash
-    curator-model: gemini/gemini-2.5-pro
+    lens-model: gemini/gemini-3.5-flash
+    curator-model: gemini/gemini-3.1-pro-preview
 ```
 
 **OpenRouter** — one key, hundreds of models across providers.
 
 ``` yaml
-- uses: sibinms/argus@v1.2.24
+- uses: sibinms/argus@v1.2.25
   env:
     OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
   with:
@@ -159,7 +159,7 @@ both are present, so a workflow-level pick always wins for a quick test.
 ### CLI
 
 ``` bash
-pip install "git+https://github.com/sibinms/argus.git@v1.2.24"
+pip install "git+https://github.com/sibinms/argus.git@v1.2.25"
 argus init
 
 export ANTHROPIC_API_KEY=...   # or OPENAI_API_KEY, GEMINI_API_KEY, ...
@@ -194,7 +194,7 @@ steps:
     args:
       - -c
       - |
-        pip install "git+https://github.com/sibinms/argus.git@v1.2.24"
+        pip install "git+https://github.com/sibinms/argus.git@v1.2.25"
         argus review \
           --github \
           --repo $$REPO_FULL_NAME \
@@ -288,14 +288,23 @@ bot approval shows as Approved but doesn't count toward a branch-protection
 ### No comment pile-up
 
 Argus reviews every push, but it moderates itself rather than stacking
-comments:
+comments — and posts a genuinely new comment only when there's something new
+to say, never an invisible edit to something old:
 
-- **One rolling summary** comment, edited in place each run — never duplicated.
 - **Each finding is posted inline once** (fingerprinted so re-wording or line
-  drift doesn't create duplicates), and its thread is **resolved** once the
-  finding is addressed.
+  drift doesn't create duplicates), on the diff line it applies to. A finding
+  that can't attach to a line (a file-level or architectural concern) goes in
+  a small separate comment instead, under the same one-time rule.
+- **Replies count.** If a finding is still flagged but someone's replied on
+  its thread, Argus re-runs the curator with that reply as context before
+  deciding what's new — so explaining why a finding doesn't apply can change
+  the verdict on the next run instead of the same comment reappearing forever.
+  A reply can downgrade or dismiss a finding, but can't out-argue a real quote
+  from the diff — that's still the only way to fully drop one.
+- A finding's thread is **resolved** once the finding is addressed in the code
+  (or dismissed via a reply the curator accepts).
 - A **hard cap** (`max_inline_comments`, default 10) bounds inline comments for
-  the life of the PR; beyond it, findings live in the summary only.
+  the life of the PR.
 - A new review is submitted **only when something changed** — otherwise Argus
   stays quiet.
 
@@ -345,7 +354,9 @@ Everything runs:
 -   in your GitHub Action
 -   or on your local machine
 
-Your chosen LLM provider receives only the context required for review.
+Your chosen LLM provider receives only the context required for review —
+this now includes replies left on a finding's thread, since the curator
+reads them to decide whether a finding still stands.
 
 ------------------------------------------------------------------------
 
