@@ -3,13 +3,14 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from argus.context.gather import Context
+from argus.context.gather import ChangedFile, Context
 from argus.lenses.base import Finding, Lens
 from argus.models.client import (
     _coerce_line,
     _complete,
     _context_prompt,
     _extract_json,
+    _max_input_tokens,
     curate_with_model,
     generate_pr_summary,
     run_lens,
@@ -70,14 +71,14 @@ def test_complete_sets_a_request_timeout(monkeypatch):
 
 def test_pr_summary_appears_in_context_prompt():
     ctx = Context(diff="+x", changed_files=[], pr_summary="## Intent\nFixes a bug.")
-    prompt = _context_prompt(ctx)
+    prompt = _context_prompt(ctx, "m", "sys")
     assert "Review brief" in prompt
     assert "Fixes a bug." in prompt
 
 
 def test_pr_summary_absent_when_empty():
     ctx = Context(diff="+x", changed_files=[], pr_summary="")
-    prompt = _context_prompt(ctx)
+    prompt = _context_prompt(ctx, "m", "sys")
     assert "Review brief" not in prompt
 
 
@@ -194,3 +195,58 @@ def test_curator_keeps_everything_on_count_mismatch(monkeypatch):
     decisions = curate_with_model(findings, Context(diff="+x", changed_files=[]), "m")
     assert len(decisions) == 2
     assert all(d["action"] == "keep" for d in decisions)
+
+
+def test_max_input_tokens_none_for_unknown_model():
+    # "m" isn't a real model litellm has metadata for -- no known limit means
+    # no trimming, not a crash.
+    assert _max_input_tokens("totally-made-up-model-xyz") is None
+
+
+def test_context_prompt_keeps_everything_when_model_unknown():
+    ctx = Context(
+        diff="+x",
+        changed_files=[ChangedFile(path="a.py", content="print(1)")],
+    )
+    prompt = _context_prompt(ctx, "totally-made-up-model-xyz", "sys")
+    assert "a.py" in prompt
+
+
+def test_context_prompt_drops_files_from_the_end_when_over_budget(monkeypatch):
+    monkeypatch.setattr(
+        "argus.models.client.get_model_info", lambda model: {"max_input_tokens": 100}
+    )
+
+    # Every prompt containing "b.py" is "over budget"; anything without it
+    # fits. This lets us assert the last file is the one that gets dropped,
+    # without needing a real tokenizer.
+    def fake_token_counter(model, messages):
+        return 1000 if "b.py" in messages[1]["content"] else 10
+
+    monkeypatch.setattr("argus.models.client.token_counter", fake_token_counter)
+
+    ctx = Context(
+        diff="+x",
+        changed_files=[
+            ChangedFile(path="a.py", content="print(1)"),
+            ChangedFile(path="b.py", content="print(2)"),
+        ],
+    )
+    prompt = _context_prompt(ctx, "m", "sys")
+    assert "a.py" in prompt
+    assert "b.py" not in prompt
+
+
+def test_context_prompt_keeps_diff_even_if_still_over_budget(monkeypatch):
+    # If dropping every file still isn't enough, there's nothing left to
+    # trim -- the diff and PR metadata are never dropped.
+    monkeypatch.setattr("argus.models.client.get_model_info", lambda model: {"max_input_tokens": 1})
+    monkeypatch.setattr("argus.models.client.token_counter", lambda model, messages: 1000)
+
+    ctx = Context(
+        diff="+x",
+        changed_files=[ChangedFile(path="a.py", content="print(1)")],
+    )
+    prompt = _context_prompt(ctx, "m", "sys")
+    assert "# Diff" in prompt
+    assert "a.py" not in prompt

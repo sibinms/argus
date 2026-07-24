@@ -21,12 +21,45 @@ from __future__ import annotations
 import json
 import logging
 
-from litellm import completion
+from litellm import completion, get_model_info, token_counter
 
 from argus.context.gather import Context
 from argus.lenses.base import Finding, Lens
 
 logger = logging.getLogger(__name__)
+
+# litellm's max_input_tokens is reported by the provider, but token_counter
+# falls back to an approximate tokenizer for models it has no exact one for
+# (e.g. most non-OpenAI providers), so leave headroom rather than trimming
+# right up to the reported limit.
+_INPUT_TOKEN_SAFETY_MARGIN = 0.9
+
+
+def _max_input_tokens(model: str) -> int | None:
+    try:
+        limit = get_model_info(model).get("max_input_tokens")
+    except Exception:
+        # Model not in litellm's database (custom/unlisted provider model) —
+        # no known limit to trim against, so leave the prompt as built.
+        logger.debug("no known input token limit for model %s", model, exc_info=True)
+        return None
+    return int(limit * _INPUT_TOKEN_SAFETY_MARGIN) if limit else None
+
+
+def _count_tokens(model: str, system_prompt: str, user_prompt: str) -> int | None:
+    try:
+        return token_counter(
+            model=model,
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt},
+            ],
+        )
+    except Exception:
+        # Can't verify the size against this model's tokenizer — don't trim
+        # blind, since we'd have no way to know when to stop.
+        logger.debug("couldn't count tokens for model %s", model, exc_info=True)
+        return None
 
 
 def _extract_json(text: str):
@@ -107,24 +140,46 @@ def generate_pr_summary(context: Context, model: str) -> str:
         return ""
 
 
-def _context_prompt(context: Context) -> str:
-    parts = []
+def _context_prompt(context: Context, model: str, system_prompt: str) -> str:
+    # Fixed parts (title/description/brief/diff) always stay — they're the
+    # smallest and highest-value part of the prompt. Per-file dumps are the
+    # part that can balloon on a large PR, so they're what gets dropped, from
+    # the end, if the assembled prompt would exceed this model's real input
+    # budget (see PR #2399: a 30-file context overflowed qwen-max's
+    # 30720-token limit and crashed the whole review, not just that lens).
+    fixed_parts = []
     if context.pr_title:
-        parts.append(f"# PR title\n{context.pr_title}")
+        fixed_parts.append(f"# PR title\n{context.pr_title}")
     if context.pr_body:
-        parts.append(f"# PR description\n{context.pr_body}")
+        fixed_parts.append(f"# PR description\n{context.pr_body}")
     if context.pr_summary:
-        parts.append(f"# Review brief\n{context.pr_summary}")
+        fixed_parts.append(f"# Review brief\n{context.pr_summary}")
+    fixed_parts.append(f"# Diff\n```diff\n{context.diff}\n```")
 
-    parts.append(f"# Diff\n```diff\n{context.diff}\n```")
-
+    file_parts = []
     for f in context.changed_files:
         if f.content is None:
             continue
         note = " (truncated)" if f.truncated else ""
-        parts.append(f"# File: {f.path}{note}\n```\n{f.content}\n```")
+        file_parts.append(f"# File: {f.path}{note}\n```\n{f.content}\n```")
 
-    return "\n\n".join(parts)
+    budget = _max_input_tokens(model)
+    if budget is None:
+        return "\n\n".join(fixed_parts + file_parts)
+
+    dropped = 0
+    while file_parts:
+        prompt = "\n\n".join(fixed_parts + file_parts)
+        tokens = _count_tokens(model, system_prompt, prompt)
+        if tokens is None or tokens <= budget:
+            break
+        file_parts.pop()
+        dropped += 1
+
+    if dropped:
+        logger.warning("dropped %d file(s) from context to fit %s's input budget", dropped, model)
+
+    return "\n\n".join(fixed_parts + file_parts)
 
 
 def _complete(system_prompt: str, user_prompt: str, model: str) -> str:
@@ -156,7 +211,8 @@ def _coerce_line(value: object) -> int | None:
 
 
 def run_lens(lens: Lens, context: Context, model: str) -> list[Finding]:
-    text = _complete(lens.system_prompt(), _context_prompt(context), model)
+    system_prompt = lens.system_prompt()
+    text = _complete(system_prompt, _context_prompt(context, model, system_prompt), model)
 
     try:
         raw_findings = _extract_json(text)
@@ -268,7 +324,7 @@ def curate_with_model(findings: list[Finding], context: Context, model: str) -> 
     ]
 
     user_prompt = (
-        _context_prompt(context)
+        _context_prompt(context, model, CURATOR_SYSTEM_PROMPT)
         + "\n\n# Findings to curate\n```json\n"
         + json.dumps(findings_payload, indent=2)
         + "\n```"
