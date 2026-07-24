@@ -20,15 +20,18 @@ only findings it can justify.
   the local report.
 - `src/argus/config.py` owns defaults and `.argus/config.yml` loading.
 - `src/argus/context/` gathers local Git diffs or GitHub PR context and applies
-  context budgets.
+  ignore rules, incremental GitHub diffing, and context budgets.
 - `src/argus/lenses/` defines lens prompts and loads built-in or custom lenses.
 - `src/argus/models/client.py` wraps LiteLLM calls for the planner, lenses, and
   curator.
 - `src/argus/curator/` deduplicates and validates curator drop decisions against
-  quoted evidence.
+  quoted evidence, including reply-aware re-curation.
+- `src/argus/fingerprint.py` defines the stable finding identity shared by
+  curation and both GitHub posting surfaces.
 - `src/argus/pipeline.py` orchestrates the planner and parallel lenses, curates
   their findings, and returns the curated result to the caller.
-- `src/argus/posting/` writes shadow reports or posts idempotent GitHub reviews.
+- `src/argus/posting/` writes shadow reports or posts idempotent, reply-aware
+  GitHub reviews with inline and overflow comments.
 - `src/argus/github_app.py` exchanges the GitHub App private key for a
   short-lived installation token used for GitHub auth.
 - `src/argus/report.py` renders markdown reports and computes review verdicts.
@@ -38,6 +41,9 @@ only findings it can justify.
 - `.argus/config.yml.example` documents user-facing config. `.argus/config.yml`
   is this repo's dogfooding config.
 - `action.yml` is the composite GitHub Action wrapper.
+- `CONTRIBUTING.md`, `SECURITY.md`, `CODE_OF_CONDUCT.md`,
+  `.github/ISSUE_TEMPLATE/`, and `.github/pull_request_template.md` define the
+  contributor and security-reporting workflow.
 
 ## Development Commands
 
@@ -75,8 +81,8 @@ Without overrides it therefore uses the default Anthropic models and requires
 their provider key. To select different eval models without editing code:
 
 ```bash
-ARGUS_EVAL_LENS_MODEL=gemini/gemini-2.5-flash \
-ARGUS_EVAL_CURATOR_MODEL=gemini/gemini-2.5-flash \
+ARGUS_EVAL_LENS_MODEL=deepseek/deepseek-v4-flash \
+ARGUS_EVAL_CURATOR_MODEL=deepseek/deepseek-v4-pro \
 python eval/run_eval.py
 ```
 
@@ -88,19 +94,23 @@ python eval/run_eval.py
   keeps modules direct and easy to audit.
 - Use fixed argv lists for subprocess calls. Avoid shell interpolation for Git
   commands.
-- Treat provider/network failures deliberately. Planner failure, malformed lens
-  JSON, malformed or mismatched curator JSON, and GitHub thread-resolution
-  failure are fail-open by design. Provider exceptions from lens or curator
-  requests currently propagate and fail the review; do not change either policy
-  accidentally.
-- Make every fail-open path, including GitHub thread resolution, emit an
-  actionable warning that identifies the failed stage or lens and retains useful
-  exception context, while never including credentials or other secret values.
-  A soft failure may leave the overall review successful, but must not be
-  reported as a successfully completed sub-operation.
-- Give every model-provider call, GitHub/API request, raw HTTP request, and
-  subprocess invocation an explicit finite timeout so an unresponsive external
-  dependency cannot stall the review indefinitely.
+- Treat PR titles, descriptions, diffs, changed-file contents, and thread replies
+  as untrusted input. They may be included in model prompts but must never be
+  executed as commands or allowed to choose credentials, repositories, pull
+  requests, or tool actions.
+- Treat provider/network failures deliberately. Planner failure, optional
+  changed-file content, malformed lens JSON, malformed or mismatched curator
+  JSON, incremental-compare failure, last-reviewed-SHA lookup, reply-aware
+  re-curation, and GitHub thread fetch/resolution are fail-open by design.
+  Provider exceptions from the primary lens or curator pass still propagate and
+  fail the review; do not change either policy accidentally.
+- Keep operational failures in best-effort enhancements observable with
+  actionable, secret-safe warnings. Expected optional-context misses and model
+  output-validation fallbacks preserve the safe baseline behavior covered by
+  tests. Never report a failed sub-operation as successfully completed.
+- Give production model-provider calls, GitHub/API requests, raw HTTP requests,
+  and subprocess invocations explicit finite timeouts so an unresponsive
+  external dependency cannot stall the review indefinitely.
 - Do not broaden context collection casually. Narrow context limits are part of
   the product behavior, not just an optimization.
 
@@ -116,6 +126,8 @@ python eval/run_eval.py
   secrets: source them only from environment variables or the CI secrets store,
   never hardcode or commit them, and never include their values in logs or error
   messages.
+- Report vulnerabilities privately through the process in `SECURITY.md`; never
+  open a public issue containing vulnerability details or sensitive logs.
 - The planner summary is useful but optional. If planner generation fails, log
   and continue with lenses.
 - Lens output that cannot be parsed should be skipped with a warning, not crash
@@ -126,13 +138,37 @@ python eval/run_eval.py
   changed-file context. If evidence is missing, keep the finding downgraded.
 - `drop_noise` is for non-problems, duplicate narration, or mis-scoped impact
   claims and does not require a code quote.
-- Posting must remain idempotent: one rolling summary, stable fingerprints for
-  inline comments, best-effort resolution of addressed threads, and a cap on
-  inline comments.
+- GitHub re-reviews are incremental. Formal reviews carry a hidden reviewed-SHA
+  marker; the next run reviews only `since_sha...head`. Failure to read or
+  compare that SHA must log and fall back to the full PR diff.
+- `Context.changed_paths` is the unbudgeted, ignore-filtered set of paths the
+  current run actually examined. Only resolve a missing finding's thread when
+  its path was in that scope; an incremental run must not resolve findings on
+  untouched files.
+- Posting has no rolling summary. Findings attach inline when possible; findings
+  without a commentable diff line, or displaced by the lifetime inline cap, go
+  to a separate overflow comment.
+- Posting must remain idempotent across both surfaces. Use the shared stable
+  fingerprint, never repost a finding already surfaced inline or in overflow,
+  never edit old overflow comments, and resolve addressed inline threads only
+  on a best-effort basis.
+- Human replies on finding threads trigger reply-aware re-curation before
+  posting. Reconstruct stale findings from their posted comments when
+  incremental context does not rediscover them. A reply may justify
+  `drop_noise` or a downgrade, but a factual `drop` still requires quoted code
+  evidence; re-curation failure logs and keeps the existing result.
+- A formal review is submitted only for a new comment or changed verdict and is
+  stamped with the reviewed SHA. If nothing changed, stay silent rather than
+  advancing the incremental baseline.
+- Post overflow comments after the formal review. An overflow-post failure must
+  propagate because otherwise findings would be lost, but already-posted inline
+  comments must remain intact.
 - GitHub inline comments may only target lines accepted by the PR diff. If a
   422 occurs for inline comments, retry body-only instead of failing the run.
 - Bot approvals can fail depending on repo settings or token owner. Fall back
   to a comment for those GitHub 422 cases.
+- Logging is configured by the CLI at warning level so best-effort failures are
+  visible in local and CI output.
 
 ## Lenses And Prompts
 
@@ -159,24 +195,32 @@ When editing lenses:
 `Config` defaults live in `src/argus/config.py`; keep those aligned with
 `.argus/config.yml.example` and README examples.
 
-This repo's `.argus/config.yml` intentionally uses Gemini flash models for
-dogfooding and ignores `eval/seed_bugs/*`, because those fixtures contain
-intentional bugs.
+This repo's `.argus/config.yml` and CI eval intentionally use DeepSeek Flash for
+lenses and DeepSeek Pro for curation. The dogfooding config ignores
+`eval/seed_bugs/*` because those fixtures contain intentional bugs.
 
 ## Testing Guidance
 
+- Documentation-only changes do not require new runtime unit tests. Verify every
+  command, path, config key, and behavioral claim against the current code,
+  tests, and workflows; run any checker specific to the edited documentation.
 - Add focused unit tests for behavior changes in the corresponding `tests/`
   module.
 - For GitHub posting changes, preserve the coverage in `tests/test_posting.py`
-  for idempotency, fingerprinting, verdict mapping, commentability, approval 422
-  fallback to a comment, inline-comment 422 retry without inline comments, and
-  propagation of non-422 errors.
+  for cross-surface idempotency, fingerprinting, inline caps and overflow,
+  reply-aware re-curation and stale reconstruction, incremental addressed-thread
+  scope, reviewed-SHA markers, verdict mapping, commentability, both 422
+  fallbacks, and propagation of non-422 errors.
 - For config changes, test missing config defaults, type validation, and override
   behavior.
-- For context changes, test both local diff behavior and ignore/budget logic.
+- For context changes, test local diff behavior, ignore/budget logic,
+  `changed_paths`, incremental `since_sha` comparisons, empty incremental diffs,
+  and full-diff fallback on any comparison failure.
 - For model parsing or curation changes, preserve the coverage in
   `tests/test_client.py` that malformed lens output is logged and skipped and
   malformed or mismatched curator output keeps every finding.
+- For reply-aware curator changes, cover unmatched findings, copied reply
+  context, evidence enforcement, and fail-open behavior in `tests/test_curate.py`.
 - For prompt/lens/curator behavior changes, run the eval harness in addition to
   unit tests.
 
@@ -190,20 +234,18 @@ intentional bugs.
   its name to `BUILTIN_LENSES` in `src/argus/config.py`, and updating
   docs/config examples when it should be enabled by default.
 - Change GitHub posting in `src/argus/posting/github.py` with care. Mock GitHub
-  objects in tests rather than calling the live API.
-- Change model prompts in `src/argus/models/client.py` or lens Markdown with an
-  eval run and a note about any recall movement.
-- Treat the version in `pyproject.toml` as the single source of truth. During a
-  release, update it first, then synchronize the legacy `src/argus/__init__.py`
-  value and every version-pinned README installation or Action example; do not
-  treat those mirrors as independent version sources. Finally, run
-  `python scripts/check_readme_version.py`.
+  objects in tests rather than calling the live API. Keep fingerprint behavior
+  centralized in `src/argus/fingerprint.py`; posting and reply matching must not
+  grow separate identity implementations.
+- Change incremental GitHub context and posting together: the reviewed-SHA
+  marker, `since_sha` comparison, `Context.changed_paths`, and addressed-thread
+  scope form one contract.
+- Treat the version in `pyproject.toml` as the package-version source of truth.
+  README release tags are user-facing installation examples derived from that
+  value, not independent version sources. Update those examples during a
+  release and run `python scripts/check_readme_version.py` to validate them.
 
-## Release And CI Notes
-
-CI installs `pip install -e ".[dev]"` and runs lint, format check, README
-version check, mypy, Bandit, pip-audit, pytest, CodeQL, and an informational
-eval job.
+## Release And Action Notes
 
 The GitHub Action in `action.yml` installs the package from the action checkout
 and runs `argus review --github --repo "$GITHUB_REPOSITORY"`, adding optional
