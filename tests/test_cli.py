@@ -83,13 +83,13 @@ def test_lens_and_curator_model_flags_override_config(tmp_path, monkeypatch):
             "--lens-model",
             "gpt-4o-mini",
             "--curator-model",
-            "gemini/gemini-2.5-pro",
+            "gemini/gemini-3.1-pro-preview",
         ],
     )
 
     assert result.exit_code == 0
     assert seen_configs[0].models.lens == "gpt-4o-mini"
-    assert seen_configs[0].models.curator == "gemini/gemini-2.5-pro"
+    assert seen_configs[0].models.curator == "gemini/gemini-3.1-pro-preview"
 
 
 def test_model_flags_override_an_existing_config_file(tmp_path, monkeypatch):
@@ -171,10 +171,11 @@ def test_github_app_credentials_used_when_both_present(tmp_path, monkeypatch):
     monkeypatch.setattr(
         cli, "get_installation_token", lambda app_id, key, repo: "app-installation-token"
     )
+    monkeypatch.setattr(cli, "last_reviewed_sha", lambda *a, **k: None)
     monkeypatch.setattr(
         cli,
         "gather_github",
-        lambda repo, pr, token, ctx: captured.update(token=token) or object(),
+        lambda repo, pr, token, ctx, since_sha=None: captured.update(token=token) or object(),
     )
     monkeypatch.setattr(cli, "run_review", lambda context, config: [])
     monkeypatch.setattr(cli, "post_to_github", lambda *a, **k: None)
@@ -196,10 +197,11 @@ def test_falls_back_to_github_token_when_app_credentials_absent(tmp_path, monkey
 
     captured = {}
     monkeypatch.setattr(cli, "get_installation_token", boom)
+    monkeypatch.setattr(cli, "last_reviewed_sha", lambda *a, **k: None)
     monkeypatch.setattr(
         cli,
         "gather_github",
-        lambda repo, pr, token, ctx: captured.update(token=token) or object(),
+        lambda repo, pr, token, ctx, since_sha=None: captured.update(token=token) or object(),
     )
     monkeypatch.setattr(cli, "run_review", lambda context, config: [])
     monkeypatch.setattr(cli, "post_to_github", lambda *a, **k: None)
@@ -236,10 +238,11 @@ def test_only_app_id_set_falls_back_to_github_token(tmp_path, monkeypatch):
 
     captured = {}
     monkeypatch.setattr(cli, "get_installation_token", boom)
+    monkeypatch.setattr(cli, "last_reviewed_sha", lambda *a, **k: None)
     monkeypatch.setattr(
         cli,
         "gather_github",
-        lambda repo, pr, token, ctx: captured.update(token=token) or object(),
+        lambda repo, pr, token, ctx, since_sha=None: captured.update(token=token) or object(),
     )
     monkeypatch.setattr(cli, "run_review", lambda context, config: [])
     monkeypatch.setattr(cli, "post_to_github", lambda *a, **k: None)
@@ -261,10 +264,11 @@ def test_only_app_private_key_set_falls_back_to_github_token(tmp_path, monkeypat
 
     captured = {}
     monkeypatch.setattr(cli, "get_installation_token", boom)
+    monkeypatch.setattr(cli, "last_reviewed_sha", lambda *a, **k: None)
     monkeypatch.setattr(
         cli,
         "gather_github",
-        lambda repo, pr, token, ctx: captured.update(token=token) or object(),
+        lambda repo, pr, token, ctx, since_sha=None: captured.update(token=token) or object(),
     )
     monkeypatch.setattr(cli, "run_review", lambda context, config: [])
     monkeypatch.setattr(cli, "post_to_github", lambda *a, **k: None)

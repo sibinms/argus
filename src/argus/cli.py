@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import shutil
 from pathlib import Path
@@ -12,7 +13,7 @@ from argus.config import DEFAULT_CONFIG_PATH, load_config
 from argus.context.gather import gather_github, gather_local
 from argus.github_app import get_installation_token
 from argus.pipeline import run_review
-from argus.posting.github import post_to_github
+from argus.posting.github import last_reviewed_sha, post_to_github
 from argus.posting.shadow import write_shadow_report
 
 
@@ -41,6 +42,11 @@ def _detect_github_pr() -> tuple[str, int] | None:
 @click.group()
 def main():
     """Argus: an AI PR reviewer built from many narrow lenses and one careful curator."""
+    # Several best-effort operations (reply-awareness, thread resolution)
+    # only ever log on failure rather than raising — without a handler
+    # configured, those warnings go nowhere, and a silent failure becomes
+    # indistinguishable from nothing having gone wrong at all.
+    logging.basicConfig(level=logging.WARNING, format="%(levelname)s %(name)s: %(message)s")
 
 
 @main.command()
@@ -118,14 +124,17 @@ def review(
                 raise click.ClickException(
                     "Set GITHUB_TOKEN, or GITHUB_APP_ID + GITHUB_APP_PRIVATE_KEY for App auth."
                 )
-        context = gather_github(repo, pr_number, token, config.context)
+        since_sha = last_reviewed_sha(repo, pr_number, token)
+        context = gather_github(repo, pr_number, token, config.context, since_sha=since_sha)
     else:
         context = gather_local(base, head, config.context)
 
     findings = run_review(context, config)
 
     if config.is_active and github:
-        post_to_github(repo, pr_number, token, findings, config.posting)
+        post_to_github(
+            repo, pr_number, token, findings, config.posting, context, config.models.curator
+        )
         click.echo(f"Posted review to {repo}#{pr_number}.")
     elif config.is_active and not github:
         click.echo(

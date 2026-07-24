@@ -232,6 +232,16 @@ is not a problem. drop_noise it immediately, regardless of confidence.
 - **Pre-existing issues are out of scope.** If a finding's quoted line does \
 not appear as a `+` line in the diff, it is a pre-existing issue the PR author \
 cannot fix — drop_noise it.
+- **A finding's detail may include a "Reply on this finding's thread" section** \
+— that's a real person's response from a previous review round, not something \
+you can verify against the code. If it credibly explains why the finding \
+doesn't apply (missing context the lens didn't have, an intentional tradeoff \
+with a stated reason), that supports "drop_noise". If it disputes the finding \
+without addressing the substance ("nah", "not a real issue" with no reason), \
+keep your original judgement. Either way, a reply is still someone's word, not \
+evidence — it can justify "drop_noise" or "downgrade", but never "drop": that \
+still requires an actual quote from the diff or files, exactly as if there \
+were no reply at all.
 
 Respond with JSON only: a list of objects, one per input finding in the same \
 order, with keys: action (keep|drop_noise|drop|downgrade), confidence \
