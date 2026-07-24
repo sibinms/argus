@@ -41,6 +41,7 @@ def _max_input_tokens(model: str) -> int | None:
     except Exception:
         # Model not in litellm's database (custom/unlisted provider model) —
         # no known limit to trim against, so leave the prompt as built.
+        logger.debug("no known input token limit for model %s", model, exc_info=True)
         return None
     return int(limit * _INPUT_TOKEN_SAFETY_MARGIN) if limit else None
 
@@ -57,6 +58,7 @@ def _count_tokens(model: str, system_prompt: str, user_prompt: str) -> int | Non
     except Exception:
         # Can't verify the size against this model's tokenizer — don't trim
         # blind, since we'd have no way to know when to stop.
+        logger.debug("couldn't count tokens for model %s", model, exc_info=True)
         return None
 
 

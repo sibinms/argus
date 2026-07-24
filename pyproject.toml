@@ -20,7 +20,7 @@ argus = "argus.cli:main"
 [project.optional-dependencies]
 dev = [
     "pytest>=8.0.0",
-    "ruff>=0.6.0",
+    "ruff>=0.6.0,<0.16.0",  # 0.16 enabled new default rules that fail on pre-existing code; bump deliberately alongside a cleanup pass
     "mypy>=1.11.0",
     "types-PyYAML>=6.0.0",
     "bandit>=1.7.0",
