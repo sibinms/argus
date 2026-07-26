@@ -9,6 +9,7 @@
 </p>
 
 <p align="center">
+  <a href="https://github.com/marketplace/actions/argus-pr-review"><img src="https://img.shields.io/badge/GitHub%20Marketplace-Argus%20PR%20Review-blue?logo=github" alt="GitHub Marketplace" /></a>
   <a href="https://github.com/sibinms/argus/actions/workflows/ci.yml"><img src="https://github.com/sibinms/argus/actions/workflows/ci.yml/badge.svg" alt="CI status" /></a>
   <a href="https://github.com/sibinms/argus/releases"><img src="https://img.shields.io/github/v/release/sibinms/argus" alt="Latest release" /></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="License: MIT" /></a>
@@ -97,7 +98,8 @@ reviewers as plain Markdown (see [Writing Custom Lenses](#writing-custom-lenses)
 
 ### GitHub Action
 
-Pick your provider and pass that provider's key. The model itself can be
+Also listed on [GitHub Marketplace](https://github.com/marketplace/actions/argus-pr-review)
+if you'd rather browse and add it from there. Pick your provider and pass that provider's key. The model itself can be
 set either way: commit `.argus/config.yml` (see [Configuration](#configuration)),
 or skip the file entirely and pass `lens-model`/`curator-model` right in
 the workflow, as shown below.
