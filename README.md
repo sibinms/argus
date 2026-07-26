@@ -5,7 +5,7 @@
 <h1 align="center">Argus</h1>
 
 <p align="center">
-  Many narrow lenses over-report. One curator drops a finding only if it can quote the diff proving it wrong.
+  An AI PR reviewer for GitHub. Many narrow lenses over-report. One curator drops a finding only if it can quote the diff proving it wrong.
 </p>
 
 <p align="center">
