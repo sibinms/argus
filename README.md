@@ -5,10 +5,11 @@
 <h1 align="center">Argus</h1>
 
 <p align="center">
-  Many narrow lenses over-report. One curator drops a finding only if it can quote the diff proving it wrong.
+  An AI PR reviewer for GitHub. Many narrow lenses over-report. One curator drops a finding only if it can quote the diff proving it wrong.
 </p>
 
 <p align="center">
+  <a href="https://github.com/marketplace/actions/argus-pr-review"><img src="https://img.shields.io/badge/GitHub%20Marketplace-Argus%20PR%20Review-blue?logo=github" alt="GitHub Marketplace" /></a>
   <a href="https://github.com/sibinms/argus/actions/workflows/ci.yml"><img src="https://github.com/sibinms/argus/actions/workflows/ci.yml/badge.svg" alt="CI status" /></a>
   <a href="https://github.com/sibinms/argus/releases"><img src="https://img.shields.io/github/v/release/sibinms/argus" alt="Latest release" /></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="License: MIT" /></a>
@@ -97,7 +98,8 @@ reviewers as plain Markdown (see [Writing Custom Lenses](#writing-custom-lenses)
 
 ### GitHub Action
 
-Pick your provider and pass that provider's key. The model itself can be
+Also listed on [GitHub Marketplace](https://github.com/marketplace/actions/argus-pr-review)
+if you'd rather browse and add it from there. Pick your provider and pass that provider's key. The model itself can be
 set either way: commit `.argus/config.yml` (see [Configuration](#configuration)),
 or skip the file entirely and pass `lens-model`/`curator-model` right in
 the workflow, as shown below.
@@ -105,7 +107,7 @@ the workflow, as shown below.
 **Anthropic**
 
 ``` yaml
-- uses: sibinms/argus@v1.2.28
+- uses: sibinms/argus@v1.2.29
   with:
     anthropic-api-key: ${{ secrets.ANTHROPIC_API_KEY }}
 ```
@@ -113,7 +115,7 @@ the workflow, as shown below.
 **OpenAI**
 
 ``` yaml
-- uses: sibinms/argus@v1.2.28
+- uses: sibinms/argus@v1.2.29
   env:
     OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
   with:
@@ -124,7 +126,7 @@ the workflow, as shown below.
 **Gemini**
 
 ``` yaml
-- uses: sibinms/argus@v1.2.28
+- uses: sibinms/argus@v1.2.29
   env:
     GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
   with:
@@ -135,7 +137,7 @@ the workflow, as shown below.
 **OpenRouter** — one key, hundreds of models across providers.
 
 ``` yaml
-- uses: sibinms/argus@v1.2.28
+- uses: sibinms/argus@v1.2.29
   env:
     OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
   with:
@@ -159,7 +161,7 @@ both are present, so a workflow-level pick always wins for a quick test.
 ### CLI
 
 ``` bash
-pip install "git+https://github.com/sibinms/argus.git@v1.2.28"
+pip install "git+https://github.com/sibinms/argus.git@v1.2.29"
 argus init
 
 export ANTHROPIC_API_KEY=...   # or OPENAI_API_KEY, GEMINI_API_KEY, ...
@@ -194,7 +196,7 @@ steps:
     args:
       - -c
       - |
-        pip install "git+https://github.com/sibinms/argus.git@v1.2.28"
+        pip install "git+https://github.com/sibinms/argus.git@v1.2.29"
         argus review \
           --github \
           --repo $$REPO_FULL_NAME \
