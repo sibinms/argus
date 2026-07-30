@@ -141,6 +141,7 @@ def test_gather_github_since_sha_with_no_changes_yields_empty_context(monkeypatc
     repo = MagicMock()
     repo.get_pull.return_value = pr
     repo.compare.return_value = comparison
+    repo.get_commit.return_value.parents = [MagicMock()]  # one parent -- not a merge commit
 
     gh = MagicMock()
     gh.get_repo.return_value = repo
@@ -173,6 +174,7 @@ def test_gather_github_scopes_to_since_sha_when_given(monkeypatch):
     repo.get_pull.return_value = pr
     repo.compare.return_value = comparison
     repo.get_contents.side_effect = GithubException(404, data={}, headers=None)
+    repo.get_commit.return_value.parents = [MagicMock()]  # one parent -- not a merge commit
 
     gh = MagicMock()
     gh.get_repo.return_value = repo
@@ -184,6 +186,41 @@ def test_gather_github_scopes_to_since_sha_when_given(monkeypatch):
     assert ctx.changed_paths == ["a.py"]
     assert "incremental change" in ctx.diff
     pr.get_files.assert_not_called()
+
+
+def test_gather_github_skips_incremental_diff_for_a_merge_commit_head(monkeypatch, caplog):
+    """A two-dot compare (since_sha...head) isn't merge-base-aware the way
+    GitHub's own three-dot PR diff is -- after a "merge base-branch into
+    this branch" commit, it would silently include every commit that landed
+    on the base branch since since_sha too, not just this PR's own work
+    (see #65). A merge commit has more than one parent; when the head is
+    one, skip repo.compare entirely and use the full base diff instead."""
+    changed = MagicMock()
+    changed.filename = "a.py"
+    changed.patch = "@@ -1 +1 @@\n+full change\n"
+
+    pr = MagicMock()
+    pr.title = "t"
+    pr.body = "b"
+    pr.head.sha = "mergesha"
+    pr.get_files.return_value = [changed]
+
+    repo = MagicMock()
+    repo.get_pull.return_value = pr
+    repo.get_contents.side_effect = GithubException(404, data={}, headers=None)
+    repo.get_commit.return_value.parents = [MagicMock(), MagicMock()]  # two parents -- a merge
+
+    gh = MagicMock()
+    gh.get_repo.return_value = repo
+    monkeypatch.setattr(github, "Github", lambda *a, **k: gh)
+
+    with caplog.at_level("WARNING"):
+        ctx = gather_github("o/r", 1, "tok", ContextConfig(), since_sha="oldsha")
+
+    repo.compare.assert_not_called()
+    pr.get_files.assert_called_once()
+    assert ctx.changed_paths == ["a.py"]
+    assert "merge commit" in caplog.text
 
 
 def test_gather_github_falls_back_to_full_diff_when_compare_fails(monkeypatch):
@@ -204,6 +241,7 @@ def test_gather_github_falls_back_to_full_diff_when_compare_fails(monkeypatch):
     repo.get_pull.return_value = pr
     repo.compare.side_effect = GithubException(404, data={}, headers=None)
     repo.get_contents.side_effect = GithubException(404, data={}, headers=None)
+    repo.get_commit.return_value.parents = [MagicMock()]  # one parent -- not a merge commit
 
     gh = MagicMock()
     gh.get_repo.return_value = repo
@@ -260,6 +298,7 @@ def test_gather_github_compare_swallows_non_github_errors(monkeypatch, caplog):
     repo.get_pull.return_value = pr
     repo.compare.side_effect = TimeoutError("connection timed out")
     repo.get_contents.side_effect = GithubException(404, data={}, headers=None)
+    repo.get_commit.return_value.parents = [MagicMock()]  # one parent -- not a merge commit
 
     gh = MagicMock()
     gh.get_repo.return_value = repo
