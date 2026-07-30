@@ -87,6 +87,7 @@ reviewers as plain Markdown (see [Writing Custom Lenses](#writing-custom-lenses)
 | Eight Parallel Lenses | Independent reviewers, each focused on a different problem domain, plus any you add. |
 | Evidence-Based Curation | Findings are removed only when evidence contradicts them. |
 | Provider Agnostic | Works with OpenAI, Anthropic, Gemini, OpenRouter and any LiteLLM provider. |
+| Data Residency (OpenRouter) | Every OpenRouter call defaults to Zero Data Retention and no training-data collection — not configurable, so it can't be missed. |
 | Custom Lenses | Create new reviewers using Markdown. |
 | Shadow Mode | Generate reports without commenting on PRs. |
 | Active Mode | Publish inline comments and review verdicts. |
@@ -107,7 +108,7 @@ the workflow, as shown below.
 **Anthropic**
 
 ``` yaml
-- uses: sibinms/argus@v1.2.30
+- uses: sibinms/argus@v1.2.32
   with:
     anthropic-api-key: ${{ secrets.ANTHROPIC_API_KEY }}
 ```
@@ -115,7 +116,7 @@ the workflow, as shown below.
 **OpenAI**
 
 ``` yaml
-- uses: sibinms/argus@v1.2.30
+- uses: sibinms/argus@v1.2.32
   env:
     OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
   with:
@@ -126,7 +127,7 @@ the workflow, as shown below.
 **Gemini**
 
 ``` yaml
-- uses: sibinms/argus@v1.2.30
+- uses: sibinms/argus@v1.2.32
   env:
     GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
   with:
@@ -137,7 +138,7 @@ the workflow, as shown below.
 **OpenRouter** — one key, hundreds of models across providers.
 
 ``` yaml
-- uses: sibinms/argus@v1.2.30
+- uses: sibinms/argus@v1.2.32
   env:
     OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
   with:
@@ -161,7 +162,7 @@ both are present, so a workflow-level pick always wins for a quick test.
 ### CLI
 
 ``` bash
-pip install "git+https://github.com/sibinms/argus.git@v1.2.30"
+pip install "git+https://github.com/sibinms/argus.git@v1.2.32"
 argus init
 
 export ANTHROPIC_API_KEY=...   # or OPENAI_API_KEY, GEMINI_API_KEY, ...
@@ -196,7 +197,7 @@ steps:
     args:
       - -c
       - |
-        pip install "git+https://github.com/sibinms/argus.git@v1.2.30"
+        pip install "git+https://github.com/sibinms/argus.git@v1.2.32"
         argus review \
           --github \
           --repo $$REPO_FULL_NAME \

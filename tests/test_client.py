@@ -6,6 +6,8 @@ import pytest
 from argus.context.gather import ChangedFile, Context
 from argus.lenses.base import Finding, Lens
 from argus.models.client import (
+    CURATOR_SYSTEM_PROMPT,
+    PLANNER_SYSTEM_PROMPT,
     _coerce_line,
     _complete,
     _context_prompt,
@@ -67,6 +69,36 @@ def test_complete_sets_a_request_timeout(monkeypatch):
     monkeypatch.setattr("argus.models.client.completion", fake_completion)
     _complete("sys", "user", "m")
     assert captured.get("timeout")
+
+
+def test_complete_defaults_openrouter_to_zero_data_retention(monkeypatch):
+    captured = {}
+
+    def fake_completion(**kwargs):
+        captured.update(kwargs)
+        resp = MagicMock()
+        resp.choices = [MagicMock()]
+        resp.choices[0].message.content = "[]"
+        return resp
+
+    monkeypatch.setattr("argus.models.client.completion", fake_completion)
+    _complete("sys", "user", "openrouter/openrouter/free")
+    assert captured.get("extra_body") == {"provider": {"zdr": True, "data_collection": "deny"}}
+
+
+def test_complete_does_not_send_openrouter_params_to_other_providers(monkeypatch):
+    captured = {}
+
+    def fake_completion(**kwargs):
+        captured.update(kwargs)
+        resp = MagicMock()
+        resp.choices = [MagicMock()]
+        resp.choices[0].message.content = "[]"
+        return resp
+
+    monkeypatch.setattr("argus.models.client.completion", fake_completion)
+    _complete("sys", "user", "claude-haiku-4-5")
+    assert "extra_body" not in captured
 
 
 def test_pr_summary_appears_in_context_prompt():
@@ -250,3 +282,23 @@ def test_context_prompt_keeps_diff_even_if_still_over_budget(monkeypatch):
     prompt = _context_prompt(ctx, "m", "sys")
     assert "# Diff" in prompt
     assert "a.py" not in prompt
+
+
+def test_untrusted_input_lines_match_what_each_call_actually_receives():
+    # Regression test for a real bug: the planner's untrusted-input line
+    # once claimed it receives "file content", but generate_pr_summary()
+    # only ever sends pr_title, pr_body, and diff -- never file content,
+    # never reply text (see PR #57). Each prompt's line should list exactly
+    # what that call sends, not an identical shared sentence.
+    assert "file content" not in PLANNER_SYSTEM_PROMPT
+    assert "reply text" not in PLANNER_SYSTEM_PROMPT
+    assert "PR title" in PLANNER_SYSTEM_PROMPT
+    assert "description" in PLANNER_SYSTEM_PROMPT
+
+    lens_prompt = Lens(name="x", instructions="y").system_prompt()
+    assert "file content" in lens_prompt
+    assert "reply text" not in lens_prompt
+
+    assert "file content" in CURATOR_SYSTEM_PROMPT
+    assert "reply text" in CURATOR_SYSTEM_PROMPT
+    assert "PR title" in CURATOR_SYSTEM_PROMPT

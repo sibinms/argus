@@ -284,7 +284,16 @@ def _graphql(query: str, variables: dict, token: str) -> dict:
         method="POST",
     )
     with urllib.request.urlopen(request, timeout=30) as response:  # nosec B310
-        return json.loads(response.read().decode("utf-8"))
+        body = json.loads(response.read().decode("utf-8"))
+    if "errors" in body:
+        # GitHub's GraphQL API returns HTTP 200 with an "errors" array on
+        # failure (e.g. a token with REST write access but insufficient
+        # GraphQL scope for a mutation like resolveReviewThread) -- silently
+        # returning here meant a thread just never resolved, with no sign
+        # anywhere that anything had gone wrong. Raise so callers' own
+        # best-effort try/except actually has something to catch and log.
+        raise RuntimeError(f"GitHub GraphQL request failed: {body['errors']}")
+    return body
 
 
 def _graphql_review_threads(repo_full_name: str, pr_number: int, token: str) -> list[dict]:
