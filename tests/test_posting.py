@@ -802,3 +802,41 @@ def test_commentable_lines_maps_each_file_to_its_diff_lines():
     pr.get_files.return_value = [f1, f2]
 
     assert commentable_lines(pr) == {"a.py": {1, 2}, "b.py": {5}}
+
+
+def test_graphql_raises_on_error_response(monkeypatch):
+    # GitHub's GraphQL API returns HTTP 200 with an "errors" array on
+    # failure (e.g. a token with REST write access but insufficient GraphQL
+    # scope for resolveReviewThread) -- this used to be returned as if it
+    # were a normal response, so a thread just never resolved with no sign
+    # anything had gone wrong (see #58).
+    class FakeResponse:
+        def read(self):
+            return b'{"errors": [{"message": "Resource not accessible by integration"}]}'
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+    monkeypatch.setattr(ghmod.urllib.request, "urlopen", lambda request, timeout: FakeResponse())
+
+    with pytest.raises(RuntimeError, match="Resource not accessible"):
+        ghmod._graphql("query { x }", {}, "token")
+
+
+def test_graphql_returns_body_on_success(monkeypatch):
+    class FakeResponse:
+        def read(self):
+            return b'{"data": {"x": 1}}'
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+    monkeypatch.setattr(ghmod.urllib.request, "urlopen", lambda request, timeout: FakeResponse())
+
+    assert ghmod._graphql("query { x }", {}, "token") == {"data": {"x": 1}}
