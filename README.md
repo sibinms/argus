@@ -87,6 +87,7 @@ reviewers as plain Markdown (see [Writing Custom Lenses](#writing-custom-lenses)
 | Eight Parallel Lenses | Independent reviewers, each focused on a different problem domain, plus any you add. |
 | Evidence-Based Curation | Findings are removed only when evidence contradicts them. |
 | Provider Agnostic | Works with OpenAI, Anthropic, Gemini, OpenRouter and any LiteLLM provider. |
+| Data Residency (OpenRouter) | Every OpenRouter call defaults to Zero Data Retention and no training-data collection — not configurable, so it can't be missed. |
 | Custom Lenses | Create new reviewers using Markdown. |
 | Shadow Mode | Generate reports without commenting on PRs. |
 | Active Mode | Publish inline comments and review verdicts. |
