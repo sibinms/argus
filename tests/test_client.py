@@ -69,6 +69,36 @@ def test_complete_sets_a_request_timeout(monkeypatch):
     assert captured.get("timeout")
 
 
+def test_complete_defaults_openrouter_to_zero_data_retention(monkeypatch):
+    captured = {}
+
+    def fake_completion(**kwargs):
+        captured.update(kwargs)
+        resp = MagicMock()
+        resp.choices = [MagicMock()]
+        resp.choices[0].message.content = "[]"
+        return resp
+
+    monkeypatch.setattr("argus.models.client.completion", fake_completion)
+    _complete("sys", "user", "openrouter/openrouter/free")
+    assert captured.get("extra_body") == {"provider": {"zdr": True, "data_collection": "deny"}}
+
+
+def test_complete_does_not_send_openrouter_params_to_other_providers(monkeypatch):
+    captured = {}
+
+    def fake_completion(**kwargs):
+        captured.update(kwargs)
+        resp = MagicMock()
+        resp.choices = [MagicMock()]
+        resp.choices[0].message.content = "[]"
+        return resp
+
+    monkeypatch.setattr("argus.models.client.completion", fake_completion)
+    _complete("sys", "user", "claude-haiku-4-5")
+    assert "extra_body" not in captured
+
+
 def test_pr_summary_appears_in_context_prompt():
     ctx = Context(diff="+x", changed_files=[], pr_summary="## Intent\nFixes a bug.")
     prompt = _context_prompt(ctx, "m", "sys")
