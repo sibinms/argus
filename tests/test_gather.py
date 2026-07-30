@@ -223,6 +223,39 @@ def test_gather_github_skips_incremental_diff_for_a_merge_commit_head(monkeypatc
     assert "merge commit" in caplog.text
 
 
+def test_gather_github_falls_back_to_full_diff_when_get_commit_fails(monkeypatch, caplog):
+    """get_commit(), not just compare(), can fail (network timeout, API
+    error, permissions) -- it's in the same try block as compare, so it
+    should fall back to the full diff the same way a failed compare does,
+    rather than being an untested gap in the merge-commit check itself."""
+    changed = MagicMock()
+    changed.filename = "a.py"
+    changed.patch = "@@ -1 +1 @@\n+full change\n"
+
+    pr = MagicMock()
+    pr.title = "t"
+    pr.body = "b"
+    pr.head.sha = "headsha"
+    pr.get_files.return_value = [changed]
+
+    repo = MagicMock()
+    repo.get_pull.return_value = pr
+    repo.get_commit.side_effect = GithubException(404, data={}, headers=None)
+    repo.get_contents.side_effect = GithubException(404, data={}, headers=None)
+
+    gh = MagicMock()
+    gh.get_repo.return_value = repo
+    monkeypatch.setattr(github, "Github", lambda *a, **k: gh)
+
+    with caplog.at_level("WARNING"):
+        ctx = gather_github("o/r", 1, "tok", ContextConfig(), since_sha="oldsha")
+
+    repo.compare.assert_not_called()
+    pr.get_files.assert_called_once()
+    assert ctx.changed_paths == ["a.py"]
+    assert "failed to compare since_sha to head" in caplog.text
+
+
 def test_gather_github_falls_back_to_full_diff_when_compare_fails(monkeypatch):
     """A since_sha that's no longer reachable (e.g. a force-push rewrote it
     out of history) shouldn't break the run -- fall back to the full PR
