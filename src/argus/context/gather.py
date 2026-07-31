@@ -113,7 +113,22 @@ def gather_github(
     pr_files = None
     if since_sha:
         try:
-            pr_files = list(repo.compare(since_sha, pr.head.sha).files)
+            head_commit = repo.get_commit(pr.head.sha)
+            if len(head_commit.parents) > 1:
+                # A two-dot compare (since_sha...head) isn't merge-base-aware
+                # the way GitHub's own three-dot PR diff is. After a "merge
+                # base-branch into this branch" commit, it silently includes
+                # every commit that landed on the base branch since since_sha
+                # too, not just this PR's own work — e.g. reviewing unrelated
+                # code from someone else's already-shipped PR (see #65, found
+                # live: an 8-file two-dot diff that was missing this PR's own
+                # 2 changed files entirely, in favour of 6 unrelated ones from
+                # the base branch). The full base diff below doesn't have
+                # this problem by construction, so skip the incremental path
+                # entirely for a merge-commit head rather than trusting it.
+                logger.warning("head %s is a merge commit, skipping incremental diff", pr.head.sha)
+            else:
+                pr_files = list(repo.compare(since_sha, pr.head.sha).files)
         except Exception:
             # Incremental diffing is an optimization on top of the core
             # review, not the review itself — any failure here (a real API
