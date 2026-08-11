@@ -10,12 +10,18 @@ from __future__ import annotations
 
 import logging
 import subprocess  # nosec B404 - only used to shell out to git with a fixed argv list
+from collections.abc import Callable
 from dataclasses import dataclass, field
 
 from argus.config import ContextConfig
 from argus.context.budget import apply_budget, is_ignored
 
 logger = logging.getLogger(__name__)
+
+# Hard cap on how many project-standards files one review will follow
+# through @import chains — a real ceiling against a typo'd self-reference or
+# an unexpectedly long chain, not a number anyone should expect to hit.
+_MAX_PROJECT_STANDARDS_FILES = 8
 
 
 @dataclass
@@ -37,6 +43,10 @@ class Context:
     # looked at this run, so it doesn't resolve a thread for a finding whose
     # file was never re-examined (see gather_github's since_sha).
     changed_paths: list[str] = field(default_factory=list)
+    # The repo's own CLAUDE.md/AGENTS.md (and anything they @import),
+    # concatenated — see _resolve_project_standards. Empty if none exist or
+    # context.project_standards_files is set to [].
+    project_standards: str = ""
 
 
 def _read_file(path: str) -> str | None:
@@ -45,6 +55,39 @@ def _read_file(path: str) -> str | None:
             return fh.read()
     except (OSError, UnicodeDecodeError):
         return None
+
+
+def _resolve_project_standards(
+    read_file: Callable[[str], str | None], entry_points: list[str]
+) -> str:
+    """Reads entry_points (e.g. CLAUDE.md, AGENTS.md) and follows any line
+    that is *only* "@relative/path.md" as an import, resolved relative to
+    repo root — the convention this project's own CLAUDE.md -> AGENTS.md ->
+    .nomod/content.md chain already uses. read_file is injected so the same
+    logic works against a local git checkout (gather_local) or the GitHub
+    API at a specific ref (gather_github); a missing file is just skipped,
+    not an error, since most repos won't have all -- or any -- of these.
+
+    Bounded by _MAX_PROJECT_STANDARDS_FILES total and cycle-safe (a path
+    already fetched, including an entry point re-imported later, is never
+    fetched twice) -- a typo'd self-reference can't loop or blow up context."""
+    seen: set[str] = set()
+    parts: list[str] = []
+    queue = list(entry_points)
+    while queue and len(seen) < _MAX_PROJECT_STANDARDS_FILES:
+        path = queue.pop(0).removeprefix("./")
+        if path in seen:
+            continue
+        seen.add(path)
+        content = read_file(path)
+        if content is None:
+            continue
+        parts.append(f"# {path}\n{content}")
+        for line in content.splitlines():
+            stripped = line.strip()
+            if stripped.startswith("@") and stripped.endswith(".md"):
+                queue.append(stripped[1:])
+    return "\n\n".join(parts)
 
 
 def gather_local(base_ref: str, head_ref: str, config: ContextConfig) -> Context:
@@ -82,11 +125,31 @@ def gather_local(base_ref: str, head_ref: str, config: ContextConfig) -> Context
     files = [ChangedFile(path=p, content=_read_file(p)) for p in changed_paths]
     files = apply_budget(files, config)
 
+    def _read_at_base(path: str) -> str | None:
+        # base_ref, not the working tree -- a PR shouldn't be able to
+        # rewrite its own review rules within the same diff being reviewed.
+        result = subprocess.run(  # nosec
+            ["git", "show", f"{base_ref}:{path}"],
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+        return result.stdout if result.returncode == 0 else None
+
+    project_standards = _resolve_project_standards(
+        _read_at_base, list(config.project_standards_files)
+    )
+
     # changed_paths on the Context is "what a lens actually saw", not every
     # file in the raw diff -- an ignored file's hunk is never in `diff`, so
     # counting it as touched would let posting wrongly resolve a still-open
     # finding on a file the lens was never shown this run.
-    return Context(diff=diff, changed_files=files, changed_paths=included_paths)
+    return Context(
+        diff=diff,
+        changed_files=files,
+        changed_paths=included_paths,
+        project_standards=project_standards,
+    )
 
 
 def gather_github(
@@ -169,10 +232,26 @@ def gather_github(
     changed_paths = [f.path for f in files]
     files = apply_budget(files, config)
 
+    def _read_at_base(path: str) -> str | None:
+        # pr.base.sha, not pr.head.sha -- a PR shouldn't be able to rewrite
+        # its own review rules within the same diff being reviewed.
+        try:
+            blob = repo.get_contents(path, ref=pr.base.sha)
+            if isinstance(blob, list):
+                return None
+            return blob.decoded_content.decode("utf-8", "ignore")
+        except GithubException:
+            return None
+
+    project_standards = _resolve_project_standards(
+        _read_at_base, list(config.project_standards_files)
+    )
+
     return Context(
         diff="\n".join(diff_parts),
         changed_files=files,
         pr_title=pr.title or "",
         pr_body=pr.body or "",
         changed_paths=changed_paths,
+        project_standards=project_standards,
     )
