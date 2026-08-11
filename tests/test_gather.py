@@ -685,6 +685,44 @@ def test_gather_github_reads_project_standards_from_base_sha_not_head(monkeypatc
     assert "Original rule: no console.log." in ctx.project_standards
 
 
+def test_gather_github_reads_at_imported_files_from_base_sha_not_head(monkeypatch):
+    """The base-not-head property must hold for a file reached via an
+    @import line too, not just the entry point -- get_contents must be
+    called with ref=pr.base.sha for the imported path as well, and a
+    version of it that only exists at head must never surface."""
+    pr = MagicMock()
+    pr.title = "t"
+    pr.body = "b"
+    pr.head.sha = "head-sha"
+    pr.base.sha = "base-sha"
+    pr.get_files.return_value = []
+
+    def fake_get_contents(path, ref=None):
+        if path == "AGENTS.md" and ref == "base-sha":
+            blob = MagicMock()
+            blob.decoded_content = b"Top-level rules.\n@docs/style.md"
+            return blob
+        if path == "docs/style.md" and ref == "base-sha":
+            blob = MagicMock()
+            blob.decoded_content = b"Original rule: no console.log."
+            return blob
+        # No fallback for any other (path, ref) pair -- in particular, a
+        # call for "docs/style.md" at head-sha (the bug this test guards
+        # against) has no match here and must raise, not silently succeed.
+        raise GithubException(404, data={}, headers=None)
+
+    repo = MagicMock()
+    repo.get_pull.return_value = pr
+    repo.get_contents.side_effect = fake_get_contents
+    gh = MagicMock()
+    gh.get_repo.return_value = repo
+    monkeypatch.setattr(github, "Github", lambda *a, **k: gh)
+
+    ctx = gather_github("o/r", 1, "tok", ContextConfig())
+
+    assert "Original rule: no console.log." in ctx.project_standards
+
+
 def test_gather_github_drops_non_utf8_standards_file_but_keeps_a_sibling(monkeypatch, caplog):
     """Regression test for the GitHub path specifically: a non-UTF-8
     CLAUDE.md must be skipped (matching gather_local's _read_at_base and
@@ -791,6 +829,32 @@ def test_gather_local_reads_project_standards_from_base_ref_not_head(tmp_path, m
     (tmp_path / "AGENTS.md").write_text("Rewritten rule: console.log is fine now.")
     (tmp_path / "app.py").write_text("console.log('debug')\n")
     _git(tmp_path, "add", "AGENTS.md", "app.py")
+    _git(tmp_path, "commit", "-qm", "change")
+
+    monkeypatch.chdir(tmp_path)
+    ctx = gather_local("base", "HEAD", ContextConfig())
+
+    assert "Original rule: no console.log." in ctx.project_standards
+    assert "Rewritten rule" not in ctx.project_standards
+
+
+def test_gather_local_reads_at_imported_files_from_base_ref_not_head(tmp_path, monkeypatch):
+    """The base-not-head property must hold for a file reached via an
+    @import line too, not just the entry point itself -- _read_at_base is
+    the same callback for both, but nothing exercised the imported-file
+    case specifically until now."""
+
+    _git(tmp_path, "init", "-q")
+    _git(tmp_path, "config", "user.email", "t@example.com")
+    _git(tmp_path, "config", "user.name", "t")
+    (tmp_path / "AGENTS.md").write_text("Top-level rules.\n@docs/style.md")
+    (tmp_path / "docs").mkdir()
+    (tmp_path / "docs" / "style.md").write_text("Original rule: no console.log.")
+    _git(tmp_path, "add", "AGENTS.md", "docs/style.md")
+    _git(tmp_path, "commit", "-qm", "init")
+    _git(tmp_path, "branch", "base")
+    (tmp_path / "docs" / "style.md").write_text("Rewritten rule: console.log is fine now.")
+    _git(tmp_path, "add", "docs/style.md")
     _git(tmp_path, "commit", "-qm", "change")
 
     monkeypatch.chdir(tmp_path)
