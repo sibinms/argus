@@ -2,6 +2,7 @@ import subprocess
 from unittest.mock import MagicMock
 
 import github
+import pytest
 from github.GithubException import GithubException
 
 from argus.config import ContextConfig
@@ -67,6 +68,33 @@ def test_gather_github_content_fetch_survives_a_non_github_error(monkeypatch):
     # comes from pr_file.patch, never from get_contents, so it must survive
     # untouched even though every get_contents call raised.
     assert "@@ -1 +1 @@" in ctx.diff and "+x" in ctx.diff
+
+
+def test_gather_github_content_fetch_propagates_a_programming_error(monkeypatch):
+    """_fetch_content's except is bounded to GithubException and OSError
+    (network/API failures), not bare Exception -- a genuine bug elsewhere in
+    the call (e.g. a TypeError from an unexpected response shape) must fail
+    loudly rather than silently degrade to "no content", or a real
+    regression in this path would be invisible outside the test suite."""
+    pr = MagicMock()
+    pr.title = "t"
+    pr.body = "b"
+    pr.head.sha = "head-sha"
+    changed = MagicMock()
+    changed.filename = "a.py"
+    changed.patch = "@@ -1 +1 @@\n+x\n"
+    pr.get_files.return_value = [changed]
+
+    repo = MagicMock()
+    repo.get_pull.return_value = pr
+    repo.get_contents.side_effect = TypeError("unexpected response shape")
+
+    gh = MagicMock()
+    gh.get_repo.return_value = repo
+    monkeypatch.setattr(github, "Github", lambda *a, **k: gh)
+
+    with pytest.raises(TypeError):
+        gather_github("o/r", 1, "tok", ContextConfig())
 
 
 def test_gather_github_sets_a_client_timeout(monkeypatch):
@@ -592,10 +620,14 @@ def test_gather_local_project_standards_disabled_when_configured_empty(tmp_path,
     assert ctx.project_standards == ""
 
 
-def test_gather_local_project_standards_survives_non_utf8_content(tmp_path, monkeypatch):
+def test_gather_local_project_standards_drops_non_utf8_file_instead_of_crashing(
+    tmp_path, monkeypatch
+):
     """A CLAUDE.md/AGENTS.md that isn't valid UTF-8 is optional context, same
-    as any other file gather_local reads -- it must degrade to unreadable
-    content, not crash the whole run with a UnicodeDecodeError."""
+    as any other file gather_local reads -- it must degrade to "file
+    skipped", matching _read_file's own UnicodeDecodeError handling, rather
+    than crash the whole run or silently include corrupted bytes as if they
+    were authoritative repo rules."""
 
     def run(*args):
         subprocess.run(["git", *args], cwd=tmp_path, check=True, capture_output=True)
@@ -617,7 +649,26 @@ def test_gather_local_project_standards_survives_non_utf8_content(tmp_path, monk
     monkeypatch.chdir(tmp_path)
     ctx = gather_local("base", "HEAD", ContextConfig())
 
-    assert "AGENTS.md" in ctx.project_standards
+    assert ctx.project_standards == ""
+
+
+def test_gather_local_project_standards_survives_git_show_timeout(monkeypatch):
+    """_read_at_base's own subprocess.run call must be guarded like every
+    other optional-content read in this file -- a `git show` that times out
+    or raises OSError on the standards file is a nice-to-have failing, not a
+    reason to crash the whole review."""
+
+    def fake_run(args, **kwargs):
+        if args[:2] == ["git", "show"]:
+            raise subprocess.TimeoutExpired(cmd=args, timeout=60)
+        result = MagicMock()
+        result.stdout = ""
+        return result
+
+    monkeypatch.setattr("subprocess.run", fake_run)
+    ctx = gather_local("base", "head", ContextConfig())
+
+    assert ctx.project_standards == ""
 
 
 def test_resolve_project_standards_returns_empty_when_nothing_found():

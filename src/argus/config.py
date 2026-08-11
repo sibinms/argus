@@ -134,11 +134,14 @@ def load_config(path: Path | None = None) -> Config:
             ignore_globs=context_raw.get("ignore_globs") or ContextConfig().ignore_globs,
             # Unlike ignore_globs above, an explicit empty list here is a
             # real, meaningful setting (disable project-standards context
-            # entirely) rather than "unset" -- `or` would collapse it back
-            # to the default, so check presence instead.
+            # entirely) rather than "unset" -- plain `or` would collapse it
+            # back to the default, so check for None specifically instead.
+            # Absent and explicit null (`project_standards_files:` with no
+            # value) both mean "unset" and fall back to the default; only a
+            # present, non-null value (including []) is treated as explicit.
             project_standards_files=(
                 context_raw["project_standards_files"]
-                if "project_standards_files" in context_raw
+                if context_raw.get("project_standards_files") is not None
                 else ContextConfig().project_standards_files
             ),
         ),

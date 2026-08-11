@@ -138,17 +138,24 @@ def gather_local(base_ref: str, head_ref: str, config: ContextConfig) -> Context
     def _read_at_base(path: str) -> str | None:
         # base_ref, not the working tree -- a PR shouldn't be able to
         # rewrite its own review rules within the same diff being reviewed.
-        # text=False (the default) and a manual "ignore" decode, not
-        # text=True's strict decoding -- a non-UTF-8 standards file is
-        # optional context, same as any other file here, and must degrade
-        # to "unreadable" rather than crash the whole run (see _read_file
-        # and _fetch_content, which are both already tolerant of this).
-        result = subprocess.run(  # nosec
-            ["git", "show", f"{base_ref}:{path}"],
-            capture_output=True,
-            timeout=60,
-        )
-        return result.stdout.decode("utf-8", "ignore") if result.returncode == 0 else None
+        # Guarded the same way _read_file is: a non-UTF-8 or otherwise
+        # unreadable standards file is optional context, and must degrade to
+        # "file skipped" (never garbled, never a crash) rather than take
+        # down the whole run over a nice-to-have.
+        try:
+            result = subprocess.run(  # nosec
+                ["git", "show", f"{base_ref}:{path}"],
+                capture_output=True,
+                timeout=60,
+            )
+        except (OSError, subprocess.TimeoutExpired):
+            return None
+        if result.returncode != 0:
+            return None
+        try:
+            return result.stdout.decode("utf-8")
+        except UnicodeDecodeError:
+            return None
 
     project_standards = _resolve_project_standards(
         _read_at_base, list(config.project_standards_files)
@@ -181,6 +188,7 @@ def gather_github(
     back to the full base diff if since_sha can't be compared (e.g. a
     force-push rewrote it out of the branch's history)."""
     from github import Github
+    from github.GithubException import GithubException
 
     gh = Github(token, timeout=30)
     repo = gh.get_repo(repo_full_name)
@@ -190,17 +198,22 @@ def gather_github(
         # Shared by the changed-file loop and the project-standards fetch
         # below (base vs head is the only real difference between the two
         # call sites). Content is always optional context here — the diff is
-        # what matters, and project standards are a nice-to-have — so any
-        # failure (a real 404, but also a transient network timeout, DNS
-        # failure, rate limit, or other issue that isn't necessarily a
-        # GithubException) degrades to "no content" rather than crashing the
-        # whole review.
+        # what matters, and project standards are a nice-to-have — so a
+        # failure degrades to "no content" rather than crashing the whole
+        # review. Bounded to GithubException (the API's own error type) and
+        # OSError (network timeouts, DNS failures, connection resets --
+        # requests' own exception classes all subclass OSError) rather than
+        # bare Exception, so an actual programming bug here (TypeError,
+        # AttributeError from an unexpected response shape) still fails
+        # loudly instead of silently degrading to "file not found". A
+        # non-UTF-8 file is treated the same as unreadable, same as
+        # _read_file, rather than silently included with corrupted bytes.
         try:
             blob = repo.get_contents(path, ref=ref)
             if isinstance(blob, list):
                 return None
-            return blob.decoded_content.decode("utf-8", "ignore")
-        except Exception:
+            return blob.decoded_content.decode("utf-8")
+        except (GithubException, OSError, UnicodeDecodeError):
             logger.debug("couldn't fetch %s at %s", path, ref, exc_info=True)
             return None
 
