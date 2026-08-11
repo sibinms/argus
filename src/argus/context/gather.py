@@ -201,22 +201,29 @@ def gather_github(
         # always optional here — the diff is what matters, and project
         # standards are a nice-to-have — so a failure degrades to "no
         # content" rather than crashing the whole review. Bounded to
-        # GithubException (the API's own error type), OSError (network
+        # GithubException (the API's own error type) and OSError (network
         # timeouts, DNS failures, connection resets -- requests' own
-        # exception classes all subclass OSError), and AssertionError
-        # (PyGithub's ContentFile.decoded_content asserts encoding ==
-        # "base64", which GitHub's Contents API doesn't set for a file over
-        # ~1MB) rather than bare Exception, so an actual programming bug
-        # here (TypeError, AttributeError from an unexpected response
-        # shape) still fails loudly instead of silently degrading to "file
-        # not found".
+        # exception classes all subclass OSError) for the fetch itself,
+        # rather than bare Exception, so an actual programming bug here
+        # (TypeError, AttributeError from an unexpected response shape)
+        # still fails loudly instead of silently degrading to "file not
+        # found".
         try:
             blob = repo.get_contents(path, ref=ref)
-            if isinstance(blob, list):
-                return None
-            content = blob.decoded_content
-        except (GithubException, OSError, AssertionError):
+        except (GithubException, OSError):
             logger.debug("couldn't fetch %s at %s", path, ref, exc_info=True)
+            return None
+        if isinstance(blob, list):
+            return None
+        try:
+            content = blob.decoded_content
+        except AssertionError:
+            # PyGithub's ContentFile.decoded_content asserts encoding ==
+            # "base64", which GitHub's Contents API doesn't set for a file
+            # over ~1MB -- scoped narrowly to this specific property access,
+            # not the get_contents call above, so a genuine PyGithub/API bug
+            # elsewhere still fails loudly rather than silently degrading.
+            logger.debug("couldn't decode content for %s at %s", path, ref, exc_info=True)
             return None
         if strict:
             # Standards are cited to lenses/the curator as this project's

@@ -97,6 +97,65 @@ def test_gather_github_content_fetch_propagates_a_programming_error(monkeypatch)
         gather_github("o/r", 1, "tok", ContextConfig())
 
 
+def test_gather_github_content_fetch_survives_decoded_content_assertion_error(monkeypatch):
+    """PyGithub's ContentFile.decoded_content asserts encoding == "base64",
+    which GitHub's Contents API doesn't set for a file over ~1MB -- this
+    specific, verified AssertionError must degrade to "no content" like any
+    other optional-content failure, not crash the whole review."""
+    pr = MagicMock()
+    pr.title = "t"
+    pr.body = "b"
+    pr.head.sha = "head-sha"
+    pr.base.sha = "base-sha"
+    changed = MagicMock()
+    changed.filename = "a.py"
+    changed.patch = "@@ -1 +1 @@\n+x\n"
+    pr.get_files.return_value = [changed]
+
+    blob = MagicMock()
+    type(blob).decoded_content = property(
+        lambda self: (_ for _ in ()).throw(AssertionError("unsupported encoding: none"))
+    )
+
+    repo = MagicMock()
+    repo.get_pull.return_value = pr
+    repo.get_contents.return_value = blob
+    gh = MagicMock()
+    gh.get_repo.return_value = repo
+    monkeypatch.setattr(github, "Github", lambda *a, **k: gh)
+
+    ctx = gather_github("o/r", 1, "tok", ContextConfig())
+
+    assert ctx.changed_files[0].content is None
+    assert ctx.project_standards == ""
+
+
+def test_gather_github_get_contents_assertion_error_still_propagates(monkeypatch):
+    """The AssertionError guard is scoped to the documented decoded_content
+    quirk specifically, not the get_contents call itself -- an AssertionError
+    raised by get_contents (a different, unverified failure mode) must still
+    fail loudly rather than silently degrade to "no content"."""
+    pr = MagicMock()
+    pr.title = "t"
+    pr.body = "b"
+    pr.head.sha = "head-sha"
+    changed = MagicMock()
+    changed.filename = "a.py"
+    changed.patch = "@@ -1 +1 @@\n+x\n"
+    pr.get_files.return_value = [changed]
+
+    repo = MagicMock()
+    repo.get_pull.return_value = pr
+    repo.get_contents.side_effect = AssertionError("unexpected internal state")
+
+    gh = MagicMock()
+    gh.get_repo.return_value = repo
+    monkeypatch.setattr(github, "Github", lambda *a, **k: gh)
+
+    with pytest.raises(AssertionError):
+        gather_github("o/r", 1, "tok", ContextConfig())
+
+
 def test_gather_github_sets_a_client_timeout(monkeypatch):
     captured = {}
 

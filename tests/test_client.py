@@ -378,6 +378,31 @@ def test_context_prompt_keeps_files_when_standards_alone_cannot_fit(monkeypatch)
     assert "# Project standards" not in prompt
 
 
+def test_context_prompt_keeps_standards_when_token_count_unavailable(monkeypatch):
+    # A known budget but a tokenizer that can't count for this model (_count_
+    # tokens catches the failure and returns None) must not trim anything --
+    # dropping blind, with no way to know whether it's actually needed, is
+    # worse than sending an untrimmed prompt.
+    monkeypatch.setattr(
+        "argus.models.client.get_model_info", lambda model: {"max_input_tokens": 100}
+    )
+
+    def fake_token_counter(model, messages):
+        raise RuntimeError("no tokenizer for this model")
+
+    monkeypatch.setattr("argus.models.client.token_counter", fake_token_counter)
+
+    ctx = Context(
+        diff="+x",
+        changed_files=[ChangedFile(path="a.py", content="print(1)")],
+        project_standards="Some binding rule.",
+    )
+    prompt = _context_prompt(ctx, "m", "sys")
+    assert "a.py" in prompt
+    assert "# Project standards" in prompt
+    assert "Some binding rule." in prompt
+
+
 def test_generate_pr_summary_includes_project_standards_in_prompt(monkeypatch):
     captured = {}
 
@@ -437,6 +462,35 @@ def test_generate_pr_summary_drops_project_standards_to_fit_budget(monkeypatch):
     user_prompt = captured["messages"][1]["content"]
     assert "# Project standards" not in user_prompt
     assert "# Diff" in user_prompt
+
+
+def test_generate_pr_summary_keeps_standards_when_token_count_unavailable(monkeypatch):
+    # A known budget but a tokenizer that can't count for this model must not
+    # drop standards blind -- see the equivalent _context_prompt test.
+    monkeypatch.setattr(
+        "argus.models.client.get_model_info", lambda model: {"max_input_tokens": 100}
+    )
+
+    def fake_token_counter(model, messages):
+        raise RuntimeError("no tokenizer for this model")
+
+    monkeypatch.setattr("argus.models.client.token_counter", fake_token_counter)
+
+    captured = {}
+
+    def fake_completion(**kwargs):
+        captured.update(kwargs)
+        resp = MagicMock()
+        resp.choices = [MagicMock()]
+        resp.choices[0].message.content = "## Intent\nx"
+        return resp
+
+    monkeypatch.setattr("argus.models.client.completion", fake_completion)
+    ctx = Context(diff="+x", changed_files=[], project_standards="Binding rule from base.")
+    generate_pr_summary(ctx, "model")
+    user_prompt = captured["messages"][1]["content"]
+    assert "# Project standards" in user_prompt
+    assert "Binding rule from base." in user_prompt
 
 
 def test_untrusted_input_lines_match_what_each_call_actually_receives():
