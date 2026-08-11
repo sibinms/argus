@@ -85,7 +85,10 @@ def _resolve_project_standards(
         parts.append(f"# {path}\n{content}")
         for line in content.splitlines():
             stripped = line.strip()
-            if stripped.startswith("@") and stripped.endswith(".md"):
+            # "only" means the whole line, not just a line that happens to
+            # start with @ and end in .md -- e.g. "@octocat's notes are in
+            # other.md" starts and ends right but is prose, not an import.
+            if stripped.startswith("@") and stripped.endswith(".md") and " " not in stripped:
                 queue.append(stripped[1:])
     return "\n\n".join(parts)
 

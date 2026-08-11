@@ -63,6 +63,10 @@ def test_gather_github_content_fetch_survives_a_non_github_error(monkeypatch):
 
     assert ctx.changed_files[0].content is None
     assert ctx.project_standards == ""
+    # The failure must be scoped to content-fetching -- the diff itself
+    # comes from pr_file.patch, never from get_contents, so it must survive
+    # untouched even though every get_contents call raised.
+    assert "@@ -1 +1 @@" in ctx.diff and "+x" in ctx.diff
 
 
 def test_gather_github_sets_a_client_timeout(monkeypatch):
@@ -621,6 +625,22 @@ def test_resolve_project_standards_ignores_at_mentions_mid_line():
         calls.append(path)
         if path == "AGENTS.md":
             return "Thanks @octocat for the review, see docs/style.md for more."
+        return None
+
+    result = _resolve_project_standards(read, ["AGENTS.md"])
+    assert calls == ["AGENTS.md"]
+    assert "octocat" in result
+
+
+def test_resolve_project_standards_ignores_at_prefixed_prose_ending_in_md():
+    # A line can start with "@" and end in ".md" without being an import --
+    # only a line that is *exactly* "@path.md" counts.
+    calls = []
+
+    def read(path):
+        calls.append(path)
+        if path == "AGENTS.md":
+            return "@octocat's notes are in other.md, not here."
         return None
 
     result = _resolve_project_standards(read, ["AGENTS.md"])
