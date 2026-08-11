@@ -35,6 +35,36 @@ def test_gather_github_handles_get_contents_failure(monkeypatch):
     assert ctx.changed_files[0].content is None
 
 
+def test_gather_github_content_fetch_survives_a_non_github_error(monkeypatch):
+    """File/project-standards content is optional context, not the review
+    itself -- a transient failure that isn't a GithubException (a network
+    timeout, DNS failure, rate limit, ...) must degrade to "no content" on
+    both the changed-file loop and the project-standards fetch, not crash
+    the whole run."""
+    pr = MagicMock()
+    pr.title = "t"
+    pr.body = "b"
+    pr.head.sha = "head-sha"
+    pr.base.sha = "base-sha"
+    changed = MagicMock()
+    changed.filename = "a.py"
+    changed.patch = "@@ -1 +1 @@\n+x\n"
+    pr.get_files.return_value = [changed]
+
+    repo = MagicMock()
+    repo.get_pull.return_value = pr
+    repo.get_contents.side_effect = TimeoutError("network is unreachable")
+
+    gh = MagicMock()
+    gh.get_repo.return_value = repo
+    monkeypatch.setattr(github, "Github", lambda *a, **k: gh)
+
+    ctx = gather_github("o/r", 1, "tok", ContextConfig())
+
+    assert ctx.changed_files[0].content is None
+    assert ctx.project_standards == ""
+
+
 def test_gather_github_sets_a_client_timeout(monkeypatch):
     captured = {}
 

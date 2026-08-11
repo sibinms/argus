@@ -167,11 +167,28 @@ def gather_github(
     back to the full base diff if since_sha can't be compared (e.g. a
     force-push rewrote it out of the branch's history)."""
     from github import Github
-    from github.GithubException import GithubException
 
     gh = Github(token, timeout=30)
     repo = gh.get_repo(repo_full_name)
     pr = repo.get_pull(pr_number)
+
+    def _fetch_content(path: str, ref: str) -> str | None:
+        # Shared by the changed-file loop and the project-standards fetch
+        # below (base vs head is the only real difference between the two
+        # call sites). Content is always optional context here — the diff is
+        # what matters, and project standards are a nice-to-have — so any
+        # failure (a real 404, but also a transient network timeout, DNS
+        # failure, rate limit, or other issue that isn't necessarily a
+        # GithubException) degrades to "no content" rather than crashing the
+        # whole review.
+        try:
+            blob = repo.get_contents(path, ref=ref)
+            if isinstance(blob, list):
+                return None
+            return blob.decoded_content.decode("utf-8", "ignore")
+        except Exception:
+            logger.debug("couldn't fetch %s at %s", path, ref, exc_info=True)
+            return None
 
     pr_files = None
     if since_sha:
@@ -212,16 +229,7 @@ def gather_github(
         if is_ignored(pr_file.filename, config.ignore_globs):
             continue
         diff_parts.append(pr_file.patch or "")
-        content = None
-        try:
-            blob = repo.get_contents(pr_file.filename, ref=pr.head.sha)
-            if not isinstance(blob, list):
-                content = blob.decoded_content.decode("utf-8", "ignore")
-        except GithubException:
-            # File content is optional context — the diff is always present.
-            # If the API can't return the full file (too large, moved/deleted,
-            # permissions), review without it rather than failing the run.
-            content = None
+        content = _fetch_content(pr_file.filename, pr.head.sha)
         files.append(ChangedFile(path=pr_file.filename, content=content))
 
     # As in gather_local: changed_paths is "what a lens actually saw", so it
@@ -232,19 +240,10 @@ def gather_github(
     changed_paths = [f.path for f in files]
     files = apply_budget(files, config)
 
-    def _read_at_base(path: str) -> str | None:
-        # pr.base.sha, not pr.head.sha -- a PR shouldn't be able to rewrite
-        # its own review rules within the same diff being reviewed.
-        try:
-            blob = repo.get_contents(path, ref=pr.base.sha)
-            if isinstance(blob, list):
-                return None
-            return blob.decoded_content.decode("utf-8", "ignore")
-        except GithubException:
-            return None
-
+    # pr.base.sha, not pr.head.sha -- a PR shouldn't be able to rewrite its
+    # own review rules within the same diff being reviewed.
     project_standards = _resolve_project_standards(
-        _read_at_base, list(config.project_standards_files)
+        lambda path: _fetch_content(path, pr.base.sha), list(config.project_standards_files)
     )
 
     return Context(
