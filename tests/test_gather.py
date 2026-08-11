@@ -6,7 +6,12 @@ import pytest
 from github.GithubException import GithubException
 
 from argus.config import ContextConfig
-from argus.context.gather import _resolve_project_standards, gather_github, gather_local
+from argus.context.gather import (
+    _is_relative_import,
+    _resolve_project_standards,
+    gather_github,
+    gather_local,
+)
 
 
 def test_gather_github_handles_get_contents_failure(monkeypatch):
@@ -926,3 +931,29 @@ def test_resolve_project_standards_ignores_parent_and_absolute_import_lines():
     result = _resolve_project_standards(read, ["AGENTS.md"])
     assert calls == ["AGENTS.md", "docs/style.md"]
     assert "Real import." in result
+
+
+def test_is_relative_import_accepts_ordinary_relative_paths():
+    assert _is_relative_import("docs/style.md") is True
+    assert _is_relative_import("style.md") is True
+
+
+def test_is_relative_import_rejects_leading_slash():
+    assert _is_relative_import("/etc/passwd.md") is False
+
+
+def test_is_relative_import_rejects_tilde():
+    assert _is_relative_import("~/x.md") is False
+
+
+def test_is_relative_import_rejects_leading_dotdot():
+    assert _is_relative_import("../secrets.md") is False
+
+
+def test_is_relative_import_rejects_embedded_dotdot():
+    assert _is_relative_import("a/../secrets.md") is False
+
+
+def test_is_relative_import_rejects_backslash_dotdot():
+    assert _is_relative_import("..\\secrets.md") is False
+    assert _is_relative_import("a\\..\\secrets.md") is False

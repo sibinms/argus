@@ -38,7 +38,12 @@ _IMPORT_LINE = re.compile(r"@(\S+\.md)")
 def _is_relative_import(path: str) -> bool:
     if path.startswith(("/", "~")):
         return False
-    return ".." not in path.split("/")
+    # Split on both separators: git/GitHub always address paths with "/"
+    # regardless of host OS, so a literal "\" in an import line is never a
+    # real directory separator to either -- but reject it here too, rather
+    # than relying on that being harmless, so "..\x.md"/"a\..\x.md" don't
+    # slip past this check the same way "../x.md"/"a/../x.md" don't.
+    return ".." not in re.split(r"[/\\]", path)
 
 
 @dataclass
