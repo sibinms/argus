@@ -15,6 +15,10 @@ from argus.context.gather import (
 )
 
 
+def _git(tmp_path, *args):
+    subprocess.run(["git", *args], cwd=tmp_path, check=True, capture_output=True)
+
+
 def test_gather_github_handles_get_contents_failure(monkeypatch):
     """If the API can't return a file's content, we keep the diff and set
     content to None rather than failing the whole review."""
@@ -535,19 +539,16 @@ def test_gather_github_changed_paths_excludes_ignored_files(monkeypatch):
 
 
 def test_gather_local_sets_changed_paths(tmp_path, monkeypatch):
-    def run(*args):
-        subprocess.run(["git", *args], cwd=tmp_path, check=True, capture_output=True)
-
-    run("init", "-q")
-    run("config", "user.email", "t@example.com")
-    run("config", "user.name", "t")
+    _git(tmp_path, "init", "-q")
+    _git(tmp_path, "config", "user.email", "t@example.com")
+    _git(tmp_path, "config", "user.name", "t")
     (tmp_path / "app.py").write_text("old\n")
-    run("add", "app.py")
-    run("commit", "-qm", "init")
-    run("branch", "base")
+    _git(tmp_path, "add", "app.py")
+    _git(tmp_path, "commit", "-qm", "init")
+    _git(tmp_path, "branch", "base")
     (tmp_path / "app.py").write_text("new\n")
-    run("add", "app.py")
-    run("commit", "-qm", "change")
+    _git(tmp_path, "add", "app.py")
+    _git(tmp_path, "commit", "-qm", "change")
 
     monkeypatch.chdir(tmp_path)
     ctx = gather_local("base", "HEAD", ContextConfig())
@@ -556,21 +557,18 @@ def test_gather_local_sets_changed_paths(tmp_path, monkeypatch):
 
 
 def test_gather_local_excludes_ignored_files_from_the_diff_itself(tmp_path, monkeypatch):
-    def run(*args):
-        subprocess.run(["git", *args], cwd=tmp_path, check=True, capture_output=True)
-
-    run("init", "-q")
-    run("config", "user.email", "t@example.com")
-    run("config", "user.name", "t")
+    _git(tmp_path, "init", "-q")
+    _git(tmp_path, "config", "user.email", "t@example.com")
+    _git(tmp_path, "config", "user.name", "t")
     (tmp_path / "app.py").write_text("old\n")
     (tmp_path / "yarn.lock").write_text("old\n")
-    run("add", "app.py", "yarn.lock")
-    run("commit", "-qm", "init")
-    run("branch", "base")
+    _git(tmp_path, "add", "app.py", "yarn.lock")
+    _git(tmp_path, "commit", "-qm", "init")
+    _git(tmp_path, "branch", "base")
     (tmp_path / "app.py").write_text("real change\n")
     (tmp_path / "yarn.lock").write_text("lockfile noise\n")
-    run("add", "app.py", "yarn.lock")
-    run("commit", "-qm", "change")
+    _git(tmp_path, "add", "app.py", "yarn.lock")
+    _git(tmp_path, "commit", "-qm", "change")
 
     monkeypatch.chdir(tmp_path)
     ctx = gather_local("base", "HEAD", ContextConfig(ignore_globs=["yarn.lock"]))
@@ -687,12 +685,13 @@ def test_gather_github_reads_project_standards_from_base_sha_not_head(monkeypatc
     assert "Original rule: no console.log." in ctx.project_standards
 
 
-def test_gather_github_drops_non_utf8_standards_file_but_keeps_a_sibling(monkeypatch):
+def test_gather_github_drops_non_utf8_standards_file_but_keeps_a_sibling(monkeypatch, caplog):
     """Regression test for the GitHub path specifically: a non-UTF-8
     CLAUDE.md must be skipped (matching gather_local's _read_at_base and
     _read_file), not garbled-included -- and, since this is a per-file
     fetch, a co-existing readable AGENTS.md must still load rather than the
-    whole chain aborting on the first unreadable entry."""
+    whole chain aborting on the first unreadable entry. Must also warn
+    (this is the strict/standards path)."""
     pr = MagicMock()
     pr.title = "t"
     pr.body = "b"
@@ -717,10 +716,13 @@ def test_gather_github_drops_non_utf8_standards_file_but_keeps_a_sibling(monkeyp
     gh.get_repo.return_value = repo
     monkeypatch.setattr(github, "Github", lambda *a, **k: gh)
 
-    ctx = gather_github("o/r", 1, "tok", ContextConfig())
+    with caplog.at_level("WARNING"):
+        ctx = gather_github("o/r", 1, "tok", ContextConfig())
 
     assert "# CLAUDE.md" not in ctx.project_standards
     assert "Detailed standards." in ctx.project_standards
+    assert "CLAUDE.md" in caplog.text
+    assert "not valid UTF-8" in caplog.text
 
 
 def test_gather_github_changed_file_content_keeps_ignore_decode_for_non_utf8(monkeypatch):
@@ -778,21 +780,18 @@ def test_gather_local_reads_project_standards_from_base_ref_not_head(tmp_path, m
     diff being reviewed -- project standards come from base, not head, even
     though head is what's actually being checked out and reviewed."""
 
-    def run(*args):
-        subprocess.run(["git", *args], cwd=tmp_path, check=True, capture_output=True)
-
-    run("init", "-q")
-    run("config", "user.email", "t@example.com")
-    run("config", "user.name", "t")
+    _git(tmp_path, "init", "-q")
+    _git(tmp_path, "config", "user.email", "t@example.com")
+    _git(tmp_path, "config", "user.name", "t")
     (tmp_path / "AGENTS.md").write_text("Original rule: no console.log.")
     (tmp_path / "app.py").write_text("old\n")
-    run("add", "AGENTS.md", "app.py")
-    run("commit", "-qm", "init")
-    run("branch", "base")
+    _git(tmp_path, "add", "AGENTS.md", "app.py")
+    _git(tmp_path, "commit", "-qm", "init")
+    _git(tmp_path, "branch", "base")
     (tmp_path / "AGENTS.md").write_text("Rewritten rule: console.log is fine now.")
     (tmp_path / "app.py").write_text("console.log('debug')\n")
-    run("add", "AGENTS.md", "app.py")
-    run("commit", "-qm", "change")
+    _git(tmp_path, "add", "AGENTS.md", "app.py")
+    _git(tmp_path, "commit", "-qm", "change")
 
     monkeypatch.chdir(tmp_path)
     ctx = gather_local("base", "HEAD", ContextConfig())
@@ -802,20 +801,17 @@ def test_gather_local_reads_project_standards_from_base_ref_not_head(tmp_path, m
 
 
 def test_gather_local_project_standards_disabled_when_configured_empty(tmp_path, monkeypatch):
-    def run(*args):
-        subprocess.run(["git", *args], cwd=tmp_path, check=True, capture_output=True)
-
-    run("init", "-q")
-    run("config", "user.email", "t@example.com")
-    run("config", "user.name", "t")
+    _git(tmp_path, "init", "-q")
+    _git(tmp_path, "config", "user.email", "t@example.com")
+    _git(tmp_path, "config", "user.name", "t")
     (tmp_path / "AGENTS.md").write_text("Some rule.")
     (tmp_path / "app.py").write_text("old\n")
-    run("add", "AGENTS.md", "app.py")
-    run("commit", "-qm", "init")
-    run("branch", "base")
+    _git(tmp_path, "add", "AGENTS.md", "app.py")
+    _git(tmp_path, "commit", "-qm", "init")
+    _git(tmp_path, "branch", "base")
     (tmp_path / "app.py").write_text("new\n")
-    run("add", "app.py")
-    run("commit", "-qm", "change")
+    _git(tmp_path, "add", "app.py")
+    _git(tmp_path, "commit", "-qm", "change")
 
     monkeypatch.chdir(tmp_path)
     ctx = gather_local("base", "HEAD", ContextConfig(project_standards_files=[]))
@@ -824,7 +820,7 @@ def test_gather_local_project_standards_disabled_when_configured_empty(tmp_path,
 
 
 def test_gather_local_project_standards_drops_non_utf8_file_but_keeps_a_sibling(
-    tmp_path, monkeypatch
+    tmp_path, monkeypatch, caplog
 ):
     """A CLAUDE.md/AGENTS.md that isn't valid UTF-8 is optional context, same
     as any other file gather_local reads -- it must degrade to "file
@@ -832,31 +828,33 @@ def test_gather_local_project_standards_drops_non_utf8_file_but_keeps_a_sibling(
     than crash the whole run or silently include corrupted bytes as if they
     were authoritative repo rules. A co-existing readable entry point must
     still load -- this is a per-file skip, not a whole-chain abort on the
-    first unreadable file."""
+    first unreadable file. Must also warn (this is the strict/standards
+    path, where a real failure must not be indistinguishable from "no such
+    file")."""
 
-    def run(*args):
-        subprocess.run(["git", *args], cwd=tmp_path, check=True, capture_output=True)
-
-    run("init", "-q")
-    run("config", "user.email", "t@example.com")
-    run("config", "user.name", "t")
+    _git(tmp_path, "init", "-q")
+    _git(tmp_path, "config", "user.email", "t@example.com")
+    _git(tmp_path, "config", "user.name", "t")
     (tmp_path / "CLAUDE.md").write_text("Top-level rules.")
     # Latin-1 bytes that aren't valid UTF-8 (0xE9 alone is a continuation
     # byte with no valid lead byte).
     (tmp_path / "AGENTS.md").write_bytes(b"R\xe9sum\xe9 of the rules.\n")
     (tmp_path / "app.py").write_text("old\n")
-    run("add", "CLAUDE.md", "AGENTS.md", "app.py")
-    run("commit", "-qm", "init")
-    run("branch", "base")
+    _git(tmp_path, "add", "CLAUDE.md", "AGENTS.md", "app.py")
+    _git(tmp_path, "commit", "-qm", "init")
+    _git(tmp_path, "branch", "base")
     (tmp_path / "app.py").write_text("new\n")
-    run("add", "app.py")
-    run("commit", "-qm", "change")
+    _git(tmp_path, "add", "app.py")
+    _git(tmp_path, "commit", "-qm", "change")
 
     monkeypatch.chdir(tmp_path)
-    ctx = gather_local("base", "HEAD", ContextConfig())
+    with caplog.at_level("WARNING"):
+        ctx = gather_local("base", "HEAD", ContextConfig())
 
     assert "Top-level rules." in ctx.project_standards
     assert "# AGENTS.md" not in ctx.project_standards
+    assert "AGENTS.md" in caplog.text
+    assert "not valid UTF-8" in caplog.text
 
 
 def test_gather_local_project_standards_survives_git_show_timeout(monkeypatch):
@@ -900,19 +898,16 @@ def test_gather_local_warns_on_git_show_timeout(monkeypatch, caplog):
 def test_gather_local_stays_quiet_when_a_standards_file_simply_does_not_exist(
     tmp_path, monkeypatch, caplog
 ):
-    def run(*args):
-        subprocess.run(["git", *args], cwd=tmp_path, check=True, capture_output=True)
-
-    run("init", "-q")
-    run("config", "user.email", "t@example.com")
-    run("config", "user.name", "t")
+    _git(tmp_path, "init", "-q")
+    _git(tmp_path, "config", "user.email", "t@example.com")
+    _git(tmp_path, "config", "user.name", "t")
     (tmp_path / "app.py").write_text("old\n")
-    run("add", "app.py")
-    run("commit", "-qm", "init")
-    run("branch", "base")
+    _git(tmp_path, "add", "app.py")
+    _git(tmp_path, "commit", "-qm", "init")
+    _git(tmp_path, "branch", "base")
     (tmp_path / "app.py").write_text("new\n")
-    run("add", "app.py")
-    run("commit", "-qm", "change")
+    _git(tmp_path, "add", "app.py")
+    _git(tmp_path, "commit", "-qm", "change")
 
     monkeypatch.chdir(tmp_path)
     with caplog.at_level("WARNING"):
