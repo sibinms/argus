@@ -9,6 +9,7 @@ GitHub Action against a real pull request.
 from __future__ import annotations
 
 import logging
+import re
 import subprocess  # nosec B404 - only used to shell out to git with a fixed argv list
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -22,6 +23,12 @@ logger = logging.getLogger(__name__)
 # through @import chains — a real ceiling against a typo'd self-reference or
 # an unexpectedly long chain, not a number anyone should expect to hit.
 _MAX_PROJECT_STANDARDS_FILES = 8
+
+# A line counts as an import only if it is *exactly* "@relative/path.md" --
+# fullmatch against \S (not just "no ASCII space") so a tab or non-breaking
+# space embedded in an otherwise-prose line can't slip through as a bogus
+# fetch path either.
+_IMPORT_LINE = re.compile(r"@(\S+\.md)")
 
 
 @dataclass
@@ -84,12 +91,12 @@ def _resolve_project_standards(
             continue
         parts.append(f"# {path}\n{content}")
         for line in content.splitlines():
-            stripped = line.strip()
             # "only" means the whole line, not just a line that happens to
             # start with @ and end in .md -- e.g. "@octocat's notes are in
             # other.md" starts and ends right but is prose, not an import.
-            if stripped.startswith("@") and stripped.endswith(".md") and " " not in stripped:
-                queue.append(stripped[1:])
+            match = _IMPORT_LINE.fullmatch(line.strip())
+            if match:
+                queue.append(match.group(1))
     return "\n\n".join(parts)
 
 
@@ -131,13 +138,17 @@ def gather_local(base_ref: str, head_ref: str, config: ContextConfig) -> Context
     def _read_at_base(path: str) -> str | None:
         # base_ref, not the working tree -- a PR shouldn't be able to
         # rewrite its own review rules within the same diff being reviewed.
+        # text=False (the default) and a manual "ignore" decode, not
+        # text=True's strict decoding -- a non-UTF-8 standards file is
+        # optional context, same as any other file here, and must degrade
+        # to "unreadable" rather than crash the whole run (see _read_file
+        # and _fetch_content, which are both already tolerant of this).
         result = subprocess.run(  # nosec
             ["git", "show", f"{base_ref}:{path}"],
             capture_output=True,
-            text=True,
             timeout=60,
         )
-        return result.stdout if result.returncode == 0 else None
+        return result.stdout.decode("utf-8", "ignore") if result.returncode == 0 else None
 
     project_standards = _resolve_project_standards(
         _read_at_base, list(config.project_standards_files)

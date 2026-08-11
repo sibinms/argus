@@ -592,6 +592,34 @@ def test_gather_local_project_standards_disabled_when_configured_empty(tmp_path,
     assert ctx.project_standards == ""
 
 
+def test_gather_local_project_standards_survives_non_utf8_content(tmp_path, monkeypatch):
+    """A CLAUDE.md/AGENTS.md that isn't valid UTF-8 is optional context, same
+    as any other file gather_local reads -- it must degrade to unreadable
+    content, not crash the whole run with a UnicodeDecodeError."""
+
+    def run(*args):
+        subprocess.run(["git", *args], cwd=tmp_path, check=True, capture_output=True)
+
+    run("init", "-q")
+    run("config", "user.email", "t@example.com")
+    run("config", "user.name", "t")
+    # Latin-1 bytes that aren't valid UTF-8 (0xE9 alone is a continuation
+    # byte with no valid lead byte).
+    (tmp_path / "AGENTS.md").write_bytes(b"R\xe9sum\xe9 of the rules.\n")
+    (tmp_path / "app.py").write_text("old\n")
+    run("add", "AGENTS.md", "app.py")
+    run("commit", "-qm", "init")
+    run("branch", "base")
+    (tmp_path / "app.py").write_text("new\n")
+    run("add", "app.py")
+    run("commit", "-qm", "change")
+
+    monkeypatch.chdir(tmp_path)
+    ctx = gather_local("base", "HEAD", ContextConfig())
+
+    assert "AGENTS.md" in ctx.project_standards
+
+
 def test_resolve_project_standards_returns_empty_when_nothing_found():
     assert _resolve_project_standards(lambda path: None, ["CLAUDE.md", "AGENTS.md"]) == ""
 
@@ -634,18 +662,37 @@ def test_resolve_project_standards_ignores_at_mentions_mid_line():
 
 def test_resolve_project_standards_ignores_at_prefixed_prose_ending_in_md():
     # A line can start with "@" and end in ".md" without being an import --
-    # only a line that is *exactly* "@path.md" counts.
+    # only a line that is *exactly* "@path.md" counts. This line both starts
+    # with "@" and ends in ".md" (unlike the mid-line "@octocat" mention
+    # covered above), so it's the case that actually exercises the guard.
     calls = []
 
     def read(path):
         calls.append(path)
         if path == "AGENTS.md":
-            return "@octocat's notes are in other.md, not here."
+            return "@octocat's notes are in other.md"
         return None
 
     result = _resolve_project_standards(read, ["AGENTS.md"])
     assert calls == ["AGENTS.md"]
     assert "octocat" in result
+
+
+def test_resolve_project_standards_ignores_non_ascii_whitespace_in_at_line():
+    # A line with an internal tab or non-breaking space still isn't *only*
+    # "@path.md" -- checking for an absent ASCII space alone wouldn't catch
+    # either of these.
+    calls = []
+
+    def read(path):
+        calls.append(path)
+        if path == "AGENTS.md":
+            return "@docs/standards.md\tnotes.md\n@docs/other.md notes.md"
+        return None
+
+    result = _resolve_project_standards(read, ["AGENTS.md"])
+    assert calls == ["AGENTS.md"]
+    assert "AGENTS.md" in result
 
 
 def test_resolve_project_standards_does_not_refetch_a_cycle():
