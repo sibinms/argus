@@ -706,9 +706,14 @@ def test_gather_github_reads_at_imported_files_from_base_sha_not_head(monkeypatc
             blob = MagicMock()
             blob.decoded_content = b"Original rule: no console.log."
             return blob
-        # No fallback for any other (path, ref) pair -- in particular, a
-        # call for "docs/style.md" at head-sha (the bug this test guards
-        # against) has no match here and must raise, not silently succeed.
+        if path == "docs/style.md" and ref == "head-sha":
+            # A divergent head-only version -- if the implementation ever
+            # queried head-sha for an imported path (directly, or as a
+            # fallback after a base-sha failure), this content, not the
+            # base one, would surface.
+            blob = MagicMock()
+            blob.decoded_content = b"Rewritten rule: console.log is fine now."
+            return blob
         raise GithubException(404, data={}, headers=None)
 
     repo = MagicMock()
@@ -721,6 +726,7 @@ def test_gather_github_reads_at_imported_files_from_base_sha_not_head(monkeypatc
     ctx = gather_github("o/r", 1, "tok", ContextConfig())
 
     assert "Original rule: no console.log." in ctx.project_standards
+    assert "Rewritten rule" not in ctx.project_standards
 
 
 def test_gather_github_drops_non_utf8_standards_file_but_keeps_a_sibling(monkeypatch, caplog):
@@ -881,6 +887,33 @@ def test_gather_local_project_standards_disabled_when_configured_empty(tmp_path,
     ctx = gather_local("base", "HEAD", ContextConfig(project_standards_files=[]))
 
     assert ctx.project_standards == ""
+
+
+def test_gather_local_drops_non_utf8_imported_file_but_keeps_entry_point(
+    tmp_path, monkeypatch, caplog
+):
+    """Same non-UTF-8 handling as the entry-point case, but for a file
+    reached via @import -- read_file is the same callback for both, but
+    nothing exercised the imported-file case specifically until now."""
+
+    _git(tmp_path, "init", "-q")
+    _git(tmp_path, "config", "user.email", "t@example.com")
+    _git(tmp_path, "config", "user.name", "t")
+    (tmp_path / "AGENTS.md").write_text("Top-level rules.\n@docs/style.md")
+    (tmp_path / "docs").mkdir()
+    (tmp_path / "docs" / "style.md").write_bytes(b"R\xe9sum\xe9 of the rules.\n")
+    _git(tmp_path, "add", "AGENTS.md", "docs/style.md")
+    _git(tmp_path, "commit", "-qm", "init")
+    _git(tmp_path, "branch", "base")
+
+    monkeypatch.chdir(tmp_path)
+    with caplog.at_level("WARNING"):
+        ctx = gather_local("base", "HEAD", ContextConfig())
+
+    assert "Top-level rules." in ctx.project_standards
+    assert "# docs/style.md" not in ctx.project_standards
+    assert "docs/style.md" in caplog.text
+    assert "not valid UTF-8" in caplog.text
 
 
 def test_gather_local_project_standards_drops_non_utf8_file_but_keeps_a_sibling(
