@@ -550,6 +550,72 @@ def test_gather_github_reads_project_standards_from_base_sha_not_head(monkeypatc
     assert "Original rule: no console.log." in ctx.project_standards
 
 
+def test_gather_github_drops_non_utf8_standards_file_but_keeps_a_sibling(monkeypatch):
+    """Regression test for the GitHub path specifically: a non-UTF-8
+    CLAUDE.md must be skipped (matching gather_local's _read_at_base and
+    _read_file), not garbled-included -- and, since this is a per-file
+    fetch, a co-existing readable AGENTS.md must still load rather than the
+    whole chain aborting on the first unreadable entry."""
+    pr = MagicMock()
+    pr.title = "t"
+    pr.body = "b"
+    pr.head.sha = "head-sha"
+    pr.base.sha = "base-sha"
+    pr.get_files.return_value = []
+
+    def fake_get_contents(path, ref=None):
+        blob = MagicMock()
+        if path == "CLAUDE.md":
+            blob.decoded_content = b"R\xe9sum\xe9 of the rules."  # invalid UTF-8
+            return blob
+        if path == "AGENTS.md":
+            blob.decoded_content = b"Detailed standards."
+            return blob
+        raise GithubException(404, data={}, headers=None)
+
+    repo = MagicMock()
+    repo.get_pull.return_value = pr
+    repo.get_contents.side_effect = fake_get_contents
+    gh = MagicMock()
+    gh.get_repo.return_value = repo
+    monkeypatch.setattr(github, "Github", lambda *a, **k: gh)
+
+    ctx = gather_github("o/r", 1, "tok", ContextConfig())
+
+    assert "# CLAUDE.md" not in ctx.project_standards
+    assert "Detailed standards." in ctx.project_standards
+
+
+def test_gather_github_changed_file_content_keeps_ignore_decode_for_non_utf8(monkeypatch):
+    """The regular changed-file loop is informational lens context, not the
+    project-standards trust boundary -- a non-UTF-8 changed file must still
+    be included with invalid bytes stripped (the pre-existing behavior),
+    not dropped entirely the way a non-UTF-8 standards file is."""
+    pr = MagicMock()
+    pr.title = "t"
+    pr.body = "b"
+    pr.head.sha = "head-sha"
+    changed = MagicMock()
+    changed.filename = "legacy.py"
+    changed.patch = "@@ -1 +1 @@\n+x\n"
+    pr.get_files.return_value = [changed]
+
+    blob = MagicMock()
+    blob.decoded_content = b"# R\xe9sum\xe9 comment\nprint(1)\n"  # invalid UTF-8
+
+    repo = MagicMock()
+    repo.get_pull.return_value = pr
+    repo.get_contents.return_value = blob
+    gh = MagicMock()
+    gh.get_repo.return_value = repo
+    monkeypatch.setattr(github, "Github", lambda *a, **k: gh)
+
+    ctx = gather_github("o/r", 1, "tok", ContextConfig(project_standards_files=[]))
+
+    assert ctx.changed_files[0].content is not None
+    assert "print(1)" in ctx.changed_files[0].content
+
+
 def test_gather_github_project_standards_disabled_when_configured_empty(monkeypatch):
     pr = MagicMock()
     pr.title = "t"
@@ -620,14 +686,16 @@ def test_gather_local_project_standards_disabled_when_configured_empty(tmp_path,
     assert ctx.project_standards == ""
 
 
-def test_gather_local_project_standards_drops_non_utf8_file_instead_of_crashing(
+def test_gather_local_project_standards_drops_non_utf8_file_but_keeps_a_sibling(
     tmp_path, monkeypatch
 ):
     """A CLAUDE.md/AGENTS.md that isn't valid UTF-8 is optional context, same
     as any other file gather_local reads -- it must degrade to "file
     skipped", matching _read_file's own UnicodeDecodeError handling, rather
     than crash the whole run or silently include corrupted bytes as if they
-    were authoritative repo rules."""
+    were authoritative repo rules. A co-existing readable entry point must
+    still load -- this is a per-file skip, not a whole-chain abort on the
+    first unreadable file."""
 
     def run(*args):
         subprocess.run(["git", *args], cwd=tmp_path, check=True, capture_output=True)
@@ -635,11 +703,12 @@ def test_gather_local_project_standards_drops_non_utf8_file_instead_of_crashing(
     run("init", "-q")
     run("config", "user.email", "t@example.com")
     run("config", "user.name", "t")
+    (tmp_path / "CLAUDE.md").write_text("Top-level rules.")
     # Latin-1 bytes that aren't valid UTF-8 (0xE9 alone is a continuation
     # byte with no valid lead byte).
     (tmp_path / "AGENTS.md").write_bytes(b"R\xe9sum\xe9 of the rules.\n")
     (tmp_path / "app.py").write_text("old\n")
-    run("add", "AGENTS.md", "app.py")
+    run("add", "CLAUDE.md", "AGENTS.md", "app.py")
     run("commit", "-qm", "init")
     run("branch", "base")
     (tmp_path / "app.py").write_text("new\n")
@@ -649,7 +718,8 @@ def test_gather_local_project_standards_drops_non_utf8_file_instead_of_crashing(
     monkeypatch.chdir(tmp_path)
     ctx = gather_local("base", "HEAD", ContextConfig())
 
-    assert ctx.project_standards == ""
+    assert "Top-level rules." in ctx.project_standards
+    assert "# AGENTS.md" not in ctx.project_standards
 
 
 def test_gather_local_project_standards_survives_git_show_timeout(monkeypatch):

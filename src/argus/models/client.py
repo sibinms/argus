@@ -152,9 +152,34 @@ def generate_pr_summary(context: Context, model: str) -> str:
         parts.append(f"# PR title\n{context.pr_title}")
     if context.pr_body:
         parts.append(f"# PR description\n{context.pr_body}")
-    if context.project_standards:
-        parts.append(f"# Project standards\n{context.project_standards}")
-    parts.append(f"# Diff\n```diff\n{context.diff}\n```")
+    diff_part = f"# Diff\n```diff\n{context.diff}\n```"
+
+    # Unlike _context_prompt, there's no list of files to progressively trim
+    # here -- just a binary call on whether standards fit at all. Standards
+    # can run to tens of thousands of tokens (up to 8 imported files), so
+    # without this check a large standards doc would push a routine, small
+    # PR's planner call over budget, and the diff (never dropped) plus
+    # title/body would be silently sacrificed for the whole call instead --
+    # the except below would swallow the failure and every review of that
+    # repo would run without a brief, regardless of that PR's own size.
+    standards_part = (
+        f"# Project standards\n{context.project_standards}" if context.project_standards else None
+    )
+    if standards_part is not None:
+        budget = _max_input_tokens(model)
+        if budget is not None:
+            prompt = "\n\n".join([*parts, standards_part, diff_part])
+            tokens = _count_tokens(model, PLANNER_SYSTEM_PROMPT, prompt)
+            if tokens is not None and tokens > budget:
+                logger.warning(
+                    "dropped project standards from planner prompt to fit %s's input budget",
+                    model,
+                )
+                standards_part = None
+
+    if standards_part is not None:
+        parts.append(standards_part)
+    parts.append(diff_part)
     user_prompt = "\n\n".join(parts)
     try:
         return _complete(PLANNER_SYSTEM_PROMPT, user_prompt, model)
@@ -201,6 +226,22 @@ def _context_prompt(context: Context, model: str, system_prompt: str) -> str:
     if budget is None:
         return "\n\n".join(fixed_parts + standards_parts + file_parts)
 
+    # If standards can't fit alongside fixed_parts even with zero files, no
+    # amount of file-trimming below will ever make room for it either --
+    # decide its fate up front, before touching files, so the file loop
+    # isn't wasted dropping every file only to still have to drop standards
+    # too. Without this check: fixed 1k + standards 9.5k + files 2k over a
+    # 10k budget used to drop the 2k file first (exiting the loop once
+    # file_parts emptied), find fixed+standards (10.5k) still over budget,
+    # and drop standards too -- ending with fixed_parts alone, when
+    # fixed+files (3k) would have fit had standards been dropped first.
+    dropped_standards = False
+    if standards_parts:
+        tokens = _count_tokens(model, system_prompt, "\n\n".join(fixed_parts + standards_parts))
+        if tokens is not None and tokens > budget:
+            standards_parts = []
+            dropped_standards = True
+
     dropped_files = 0
     while file_parts:
         prompt = "\n\n".join(fixed_parts + standards_parts + file_parts)
@@ -209,14 +250,6 @@ def _context_prompt(context: Context, model: str, system_prompt: str) -> str:
             break
         file_parts.pop()
         dropped_files += 1
-
-    dropped_standards = False
-    if standards_parts:
-        prompt = "\n\n".join(fixed_parts + standards_parts + file_parts)
-        tokens = _count_tokens(model, system_prompt, prompt)
-        if tokens is not None and tokens > budget:
-            standards_parts = []
-            dropped_standards = True
 
     if dropped_files:
         logger.warning(

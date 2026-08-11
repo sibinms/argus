@@ -351,6 +351,33 @@ def test_context_prompt_keeps_project_standards_when_it_fits_after_files_drop(mo
     assert "Some binding rule." in prompt
 
 
+def test_context_prompt_keeps_files_when_standards_alone_cannot_fit(monkeypatch):
+    # Regression test: standards that are too large to ever coexist with
+    # fixed_parts (regardless of files) must be dropped up front, not after
+    # wastefully trimming every file trying to accommodate it -- otherwise a
+    # lens ends up with neither, when fixed+files alone would have fit.
+    monkeypatch.setattr(
+        "argus.models.client.get_model_info", lambda model: {"max_input_tokens": 100}
+    )
+
+    def fake_token_counter(model, messages):
+        content = messages[1]["content"]
+        if "# Project standards" in content:
+            return 1000  # too big to ever fit, with or without files
+        return 10
+
+    monkeypatch.setattr("argus.models.client.token_counter", fake_token_counter)
+
+    ctx = Context(
+        diff="+x",
+        changed_files=[ChangedFile(path="a.py", content="print(1)")],
+        project_standards="A standards doc too large to ever fit.",
+    )
+    prompt = _context_prompt(ctx, "m", "sys")
+    assert "a.py" in prompt
+    assert "# Project standards" not in prompt
+
+
 def test_generate_pr_summary_includes_project_standards_in_prompt(monkeypatch):
     captured = {}
 
@@ -383,6 +410,33 @@ def test_generate_pr_summary_omits_project_standards_section_when_absent(monkeyp
     ctx = Context(diff="+x", changed_files=[], project_standards="")
     generate_pr_summary(ctx, "model")
     assert "# Project standards" not in captured["messages"][1]["content"]
+
+
+def test_generate_pr_summary_drops_project_standards_to_fit_budget(monkeypatch):
+    # Regression test: unlike _context_prompt's per-file dumps, project
+    # standards here has no progressive list to trim -- it's all-or-nothing,
+    # and without a budget check a large standards doc would push a routine
+    # PR's planner call over budget regardless of the PR's own size.
+    monkeypatch.setattr(
+        "argus.models.client.get_model_info", lambda model: {"max_input_tokens": 100}
+    )
+    monkeypatch.setattr("argus.models.client.token_counter", lambda model, messages: 1000)
+
+    captured = {}
+
+    def fake_completion(**kwargs):
+        captured.update(kwargs)
+        resp = MagicMock()
+        resp.choices = [MagicMock()]
+        resp.choices[0].message.content = "## Intent\nx"
+        return resp
+
+    monkeypatch.setattr("argus.models.client.completion", fake_completion)
+    ctx = Context(diff="+x", changed_files=[], project_standards="A doc too large to fit.")
+    generate_pr_summary(ctx, "model")
+    user_prompt = captured["messages"][1]["content"]
+    assert "# Project standards" not in user_prompt
+    assert "# Diff" in user_prompt
 
 
 def test_untrusted_input_lines_match_what_each_call_actually_receives():
