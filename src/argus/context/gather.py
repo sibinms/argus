@@ -19,10 +19,19 @@ from argus.context.budget import apply_budget, is_ignored
 
 logger = logging.getLogger(__name__)
 
-# Hard cap on how many project-standards files one review will follow
-# through @import chains — a real ceiling against a typo'd self-reference or
-# an unexpectedly long chain, not a number anyone should expect to hit.
+# Hard cap on how many project-standards files one review will actually
+# include -- a missing/unreadable file (e.g. the default list's CLAUDE.md,
+# on the common repo that only has AGENTS.md) doesn't consume a slot here,
+# only a genuinely included one does; see _MAX_PROJECT_STANDARDS_ATTEMPTS
+# for the separate bound on total fetch attempts.
 _MAX_PROJECT_STANDARDS_FILES = 8
+
+# Separate, more generous cap on total fetch attempts (successful or not) --
+# without this, a chain of bogus/missing @imports would never trip
+# _MAX_PROJECT_STANDARDS_FILES (which only counts successes) and could fetch
+# unbounded nonexistent paths. Not expected to matter in practice; it exists
+# purely as a backstop against a typo'd self-reference or pathological chain.
+_MAX_PROJECT_STANDARDS_ATTEMPTS = 32
 
 # A line counts as an import only if it is *exactly* "@relative/path.md" --
 # fullmatch against \S (not just "no ASCII space") so a tab or non-breaking
@@ -90,13 +99,23 @@ def _resolve_project_standards(
     API at a specific ref (gather_github); a missing file is just skipped,
     not an error, since most repos won't have all -- or any -- of these.
 
-    Bounded by _MAX_PROJECT_STANDARDS_FILES total and cycle-safe (a path
-    already fetched, including an entry point re-imported later, is never
-    fetched twice) -- a typo'd self-reference can't loop or blow up context."""
+    Bounded by _MAX_PROJECT_STANDARDS_FILES *included* files and cycle-safe
+    (a path already attempted, including an entry point re-imported later,
+    is never fetched twice) -- a typo'd self-reference can't loop or blow up
+    context. A missing/unreadable file doesn't count against that cap (see
+    _MAX_PROJECT_STANDARDS_ATTEMPTS for the separate, more generous bound on
+    total attempts) -- otherwise the default entry points alone would
+    silently shrink a repo's real budget: on a repo with only AGENTS.md, the
+    nonexistent CLAUDE.md would take a slot that contributes nothing."""
     seen: set[str] = set()
     parts: list[str] = []
+    included = 0
     queue = list(entry_points)
-    while queue and len(seen) < _MAX_PROJECT_STANDARDS_FILES:
+    while (
+        queue
+        and included < _MAX_PROJECT_STANDARDS_FILES
+        and len(seen) < _MAX_PROJECT_STANDARDS_ATTEMPTS
+    ):
         path = queue.pop(0).removeprefix("./")
         if path in seen:
             continue
@@ -104,6 +123,7 @@ def _resolve_project_standards(
         content = read_file(path)
         if content is None:
             continue
+        included += 1
         parts.append(f"# {path}\n{content}")
         for line in content.splitlines():
             # "only" means the whole line, not just a line that happens to
@@ -156,7 +176,14 @@ def gather_local(base_ref: str, head_ref: str, config: ContextConfig) -> Context
         # Guarded the same way _read_file is: a non-UTF-8 or otherwise
         # unreadable standards file is optional context, and must degrade to
         # "file skipped" (never garbled, never a crash) rather than take
-        # down the whole run over a nice-to-have.
+        # down the whole run over a nice-to-have. A plain nonexistent file
+        # (returncode != 0) is the expected, common case -- most repos don't
+        # have every entry in project_standards_files -- so that alone stays
+        # quiet. A real failure (the process itself erroring, or content
+        # that exists but isn't readable) is different: silently degrading
+        # this project's binding conventions to "" with no signal would
+        # make a transient failure indistinguishable from "no such file",
+        # so warn instead.
         try:
             result = subprocess.run(  # nosec
                 ["git", "show", f"{base_ref}:{path}"],
@@ -164,12 +191,18 @@ def gather_local(base_ref: str, head_ref: str, config: ContextConfig) -> Context
                 timeout=60,
             )
         except (OSError, subprocess.TimeoutExpired):
+            logger.warning(
+                "couldn't read project standards file %s at %s", path, base_ref, exc_info=True
+            )
             return None
         if result.returncode != 0:
             return None
         try:
             return result.stdout.decode("utf-8")
         except UnicodeDecodeError:
+            logger.warning(
+                "project standards file %s at %s is not valid UTF-8, skipping", path, base_ref
+            )
             return None
 
     project_standards = _resolve_project_standards(
@@ -223,10 +256,39 @@ def gather_github(
         # (TypeError, AttributeError from an unexpected response shape)
         # still fails loudly instead of silently degrading to "file not
         # found".
+        # A plain 404 is the expected, common case for the standards fetch --
+        # most repos don't have every entry in project_standards_files -- so
+        # that alone stays quiet regardless of strict/lenient. Any other
+        # failure on the strict (standards) path is different: silently
+        # degrading this project's binding conventions to "" with no signal
+        # would make a transient failure (rate limit, 5xx, network error)
+        # indistinguishable from "no such file", so warn instead. The
+        # lenient (changed-file) path stays at debug either way -- a missing/
+        # renamed/deleted file is routine on nearly every PR, and warning on
+        # every one of those would be pure noise.
         try:
             blob = repo.get_contents(path, ref=ref)
-        except (GithubException, OSError):
-            logger.debug("couldn't fetch %s at %s", path, ref, exc_info=True)
+        except GithubException as e:
+            if strict and e.status != 404:
+                logger.warning(
+                    "couldn't fetch project standards file %s at %s (status %s)",
+                    path,
+                    ref,
+                    e.status,
+                )
+            else:
+                logger.debug("couldn't fetch %s at %s", path, ref, exc_info=True)
+            return None
+        except OSError:
+            if strict:
+                logger.warning(
+                    "couldn't fetch project standards file %s at %s (network error)",
+                    path,
+                    ref,
+                    exc_info=True,
+                )
+            else:
+                logger.debug("couldn't fetch %s at %s", path, ref, exc_info=True)
             return None
         if isinstance(blob, list):
             return None
@@ -238,6 +300,8 @@ def gather_github(
             # over ~1MB -- scoped narrowly to this specific property access,
             # not the get_contents call above, so a genuine PyGithub/API bug
             # elsewhere still fails loudly rather than silently degrading.
+            # Kept at debug even for strict: an oversized file is an
+            # expected limitation, not a transient failure worth a warning.
             logger.debug("couldn't decode content for %s at %s", path, ref, exc_info=True)
             return None
         if strict:
@@ -249,6 +313,9 @@ def gather_github(
             try:
                 return content.decode("utf-8")
             except UnicodeDecodeError:
+                logger.warning(
+                    "project standards file %s at %s is not valid UTF-8, skipping", path, ref
+                )
                 return None
         # The regular changed-file loop is informational lens context, not a
         # trust boundary -- a few garbled bytes from a Latin-1/Windows-1252

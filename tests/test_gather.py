@@ -7,6 +7,7 @@ from github.GithubException import GithubException
 
 from argus.config import ContextConfig
 from argus.context.gather import (
+    _MAX_PROJECT_STANDARDS_ATTEMPTS,
     _is_relative_import,
     _resolve_project_standards,
     gather_github,
@@ -584,6 +585,78 @@ def test_gather_local_excludes_ignored_files_from_the_diff_itself(tmp_path, monk
     assert ctx.changed_paths == ["app.py"]
 
 
+def test_gather_github_warns_on_non_404_standards_fetch_failure(monkeypatch, caplog):
+    # A plain "file doesn't exist" (404) is the expected, common case for
+    # most repos' project_standards_files -- but a real failure (rate limit,
+    # 5xx) silently degrading the same way would make a transient error
+    # indistinguishable from "no such file", so it must warn.
+    pr = MagicMock()
+    pr.title = "t"
+    pr.body = "b"
+    pr.head.sha = "head-sha"
+    pr.base.sha = "base-sha"
+    pr.get_files.return_value = []
+
+    repo = MagicMock()
+    repo.get_pull.return_value = pr
+    repo.get_contents.side_effect = GithubException(403, data={}, headers=None)
+    gh = MagicMock()
+    gh.get_repo.return_value = repo
+    monkeypatch.setattr(github, "Github", lambda *a, **k: gh)
+
+    with caplog.at_level("WARNING"):
+        ctx = gather_github("o/r", 1, "tok", ContextConfig())
+
+    assert ctx.project_standards == ""
+    assert "CLAUDE.md" in caplog.text or "AGENTS.md" in caplog.text
+
+
+def test_gather_github_stays_quiet_on_a_plain_404_for_standards(monkeypatch, caplog):
+    pr = MagicMock()
+    pr.title = "t"
+    pr.body = "b"
+    pr.head.sha = "head-sha"
+    pr.base.sha = "base-sha"
+    pr.get_files.return_value = []
+
+    repo = MagicMock()
+    repo.get_pull.return_value = pr
+    repo.get_contents.side_effect = GithubException(404, data={}, headers=None)
+    gh = MagicMock()
+    gh.get_repo.return_value = repo
+    monkeypatch.setattr(github, "Github", lambda *a, **k: gh)
+
+    with caplog.at_level("WARNING"):
+        gather_github("o/r", 1, "tok", ContextConfig())
+
+    assert caplog.text == ""
+
+
+def test_gather_github_stays_quiet_on_a_missing_changed_file_even_on_error(monkeypatch, caplog):
+    # The lenient (changed-file) path must never warn -- a missing/renamed/
+    # deleted file is routine on nearly every PR, unlike the standards path.
+    pr = MagicMock()
+    pr.title = "t"
+    pr.body = "b"
+    pr.head.sha = "head-sha"
+    changed = MagicMock()
+    changed.filename = "a.py"
+    changed.patch = "@@ -1 +1 @@\n+x\n"
+    pr.get_files.return_value = [changed]
+
+    repo = MagicMock()
+    repo.get_pull.return_value = pr
+    repo.get_contents.side_effect = GithubException(403, data={}, headers=None)
+    gh = MagicMock()
+    gh.get_repo.return_value = repo
+    monkeypatch.setattr(github, "Github", lambda *a, **k: gh)
+
+    with caplog.at_level("WARNING"):
+        gather_github("o/r", 1, "tok", ContextConfig(project_standards_files=[]))
+
+    assert caplog.text == ""
+
+
 def test_gather_github_reads_project_standards_from_base_sha_not_head(monkeypatch):
     """Same base-not-head security property as gather_local, but via the
     GitHub API: get_contents must be called with ref=pr.base.sha, and a
@@ -805,6 +878,50 @@ def test_gather_local_project_standards_survives_git_show_timeout(monkeypatch):
     assert ctx.project_standards == ""
 
 
+def test_gather_local_warns_on_git_show_timeout(monkeypatch, caplog):
+    # A real process-level failure reading a standards file must not be
+    # silently indistinguishable from "no such file" -- unlike a plain
+    # nonexistent file (a nonzero git exit code), which stays quiet since
+    # most repos don't have every entry in project_standards_files.
+    def fake_run(args, **kwargs):
+        if args[:2] == ["git", "show"]:
+            raise subprocess.TimeoutExpired(cmd=args, timeout=60)
+        result = MagicMock()
+        result.stdout = ""
+        return result
+
+    monkeypatch.setattr("subprocess.run", fake_run)
+    with caplog.at_level("WARNING"):
+        gather_local("base", "head", ContextConfig())
+
+    assert "CLAUDE.md" in caplog.text or "AGENTS.md" in caplog.text
+
+
+def test_gather_local_stays_quiet_when_a_standards_file_simply_does_not_exist(
+    tmp_path, monkeypatch, caplog
+):
+    def run(*args):
+        subprocess.run(["git", *args], cwd=tmp_path, check=True, capture_output=True)
+
+    run("init", "-q")
+    run("config", "user.email", "t@example.com")
+    run("config", "user.name", "t")
+    (tmp_path / "app.py").write_text("old\n")
+    run("add", "app.py")
+    run("commit", "-qm", "init")
+    run("branch", "base")
+    (tmp_path / "app.py").write_text("new\n")
+    run("add", "app.py")
+    run("commit", "-qm", "change")
+
+    monkeypatch.chdir(tmp_path)
+    with caplog.at_level("WARNING"):
+        ctx = gather_local("base", "HEAD", ContextConfig())
+
+    assert ctx.project_standards == ""
+    assert caplog.text == ""
+
+
 def test_resolve_project_standards_returns_empty_when_nothing_found():
     assert _resolve_project_standards(lambda path: None, ["CLAUDE.md", "AGENTS.md"]) == ""
 
@@ -906,6 +1023,48 @@ def test_resolve_project_standards_caps_total_files():
 
     result = _resolve_project_standards(read, ["f0.md"])
     assert result.count("# f") <= 8
+
+
+def test_resolve_project_standards_missing_entry_point_does_not_consume_a_slot():
+    # Regression test: a nonexistent CLAUDE.md (the common case -- most
+    # repos only have AGENTS.md, but both are default entry points) must not
+    # eat one of the 8 included-file slots, or a chain of 8 genuinely valid
+    # imports from AGENTS.md would silently lose its last one to the
+    # nonexistent CLAUDE.md contributing nothing.
+    def read(path):
+        if path == "CLAUDE.md":
+            return None
+        if path == "AGENTS.md":
+            return "@f0.md"
+        n = int(path.removeprefix("f").removesuffix(".md"))
+        if n < 7:
+            return f"@f{n + 1}.md"
+        return "leaf"
+
+    result = _resolve_project_standards(read, ["CLAUDE.md", "AGENTS.md"])
+    assert result.count("# ") == 8  # AGENTS.md + f0..f6, all 8 real files
+    assert "leaf" not in result  # f7 (the 9th real file) is correctly capped
+
+
+def test_resolve_project_standards_caps_total_attempts_on_bogus_imports():
+    # A single successfully-read file listing many nonexistent @imports
+    # would never trip the included-files cap (which only counts
+    # successes, and that one real file is the only success here) -- the
+    # separate, more generous attempts cap must still bound total fetch
+    # attempts so a long list of typo'd imports can't run away.
+    calls = []
+    bogus_imports = "\n".join(f"@missing{i}.md" for i in range(100))
+
+    def read(path):
+        calls.append(path)
+        if path == "AGENTS.md":
+            return bogus_imports
+        return None  # every @missingN.md fails to resolve
+
+    result = _resolve_project_standards(read, ["AGENTS.md"])
+    assert "AGENTS.md" in result
+    assert len(calls) <= _MAX_PROJECT_STANDARDS_ATTEMPTS
+    assert len(calls) < 100  # proves the cap actually cut off the 100 bogus imports
 
 
 def test_resolve_project_standards_strips_leading_dot_slash():
