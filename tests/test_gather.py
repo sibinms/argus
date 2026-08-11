@@ -907,3 +907,22 @@ def test_resolve_project_standards_strips_leading_dot_slash():
     files = {"docs/standards.md": "Team conventions."}
     result = _resolve_project_standards(files.get, ["./docs/standards.md"])
     assert "Team conventions." in result
+
+
+def test_resolve_project_standards_ignores_parent_and_absolute_import_lines():
+    # "@relative/path.md" is the documented shape -- "@../x.md" and "@/x.md"
+    # both match the regex's \S+ but aren't relative paths within the repo,
+    # so they must not be queued as imports at all.
+    calls = []
+
+    def read(path):
+        calls.append(path)
+        if path == "AGENTS.md":
+            return "@../secrets.md\n@/etc/passwd.md\n@docs/style.md"
+        if path == "docs/style.md":
+            return "Real import."
+        return None
+
+    result = _resolve_project_standards(read, ["AGENTS.md"])
+    assert calls == ["AGENTS.md", "docs/style.md"]
+    assert "Real import." in result

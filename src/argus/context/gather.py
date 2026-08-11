@@ -27,8 +27,18 @@ _MAX_PROJECT_STANDARDS_FILES = 8
 # A line counts as an import only if it is *exactly* "@relative/path.md" --
 # fullmatch against \S (not just "no ASCII space") so a tab or non-breaking
 # space embedded in an otherwise-prose line can't slip through as a bogus
-# fetch path either.
+# fetch path either. \S alone also matches "/" and ".", so "@../x.md" or
+# "@/x.md" match the regex too; _is_relative_import rejects those since
+# they aren't the documented "relative/path.md" shape -- git/GitHub already
+# refuse to resolve either outside the repo, so this isn't a traversal risk,
+# just a wasted fetch and import slot on a line that isn't a real import.
 _IMPORT_LINE = re.compile(r"@(\S+\.md)")
+
+
+def _is_relative_import(path: str) -> bool:
+    if path.startswith(("/", "~")):
+        return False
+    return ".." not in path.split("/")
 
 
 @dataclass
@@ -95,7 +105,7 @@ def _resolve_project_standards(
             # start with @ and end in .md -- e.g. "@octocat's notes are in
             # other.md" starts and ends right but is prose, not an import.
             match = _IMPORT_LINE.fullmatch(line.strip())
-            if match:
+            if match and _is_relative_import(match.group(1)):
                 queue.append(match.group(1))
     return "\n\n".join(parts)
 
