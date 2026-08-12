@@ -48,6 +48,16 @@ context:
     - "package-lock.json"
     - "yarn.lock"
     - "pnpm-lock.yaml"
+  # Repo-root files fed to every lens, the curator, and the planner as this
+  # project's binding conventions — read from the PR's base branch, not head,
+  # so a PR can't rewrite its own review rules within the diff being
+  # reviewed. Each file is scanned for "@relative/path.md"-only lines and
+  # those are pulled in too, so an existing CLAUDE.md -> AGENTS.md ->
+  # docs/standards.md import chain reaches Argus the same way it reaches a
+  # human or another agent. Set to [] to disable.
+  project_standards_files:
+    - CLAUDE.md
+    - AGENTS.md
 
 posting:
   min_confidence: medium   # low | medium | high
