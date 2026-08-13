@@ -44,6 +44,14 @@ class ContextConfig:
             "pnpm-lock.yaml",
         ]
     )
+    # Repo-root files read (from the PR's base branch, not head — a PR
+    # shouldn't be able to rewrite its own review rules) and fed to every
+    # lens, the curator, and the planner as project-specific standards. Each
+    # is scanned for "@relative/path.md"-only lines and those are pulled in
+    # too, so an existing CLAUDE.md -> AGENTS.md -> docs/standards.md chain
+    # reaches Argus the same way it reaches a human or another agent. Set to
+    # an empty list to disable.
+    project_standards_files: list[str] = field(default_factory=lambda: ["CLAUDE.md", "AGENTS.md"])
 
 
 @dataclass
@@ -100,6 +108,13 @@ def load_config(path: Path | None = None) -> Config:
         _require_type(context_raw["max_bytes_per_file"], int, "context.max_bytes_per_file")
     if "ignore_globs" in context_raw and context_raw["ignore_globs"] is not None:
         _require_type(context_raw["ignore_globs"], list, "context.ignore_globs")
+    if (
+        "project_standards_files" in context_raw
+        and context_raw["project_standards_files"] is not None
+    ):
+        _require_type(
+            context_raw["project_standards_files"], list, "context.project_standards_files"
+        )
     if "max_inline_comments" in posting_raw:
         _require_type(posting_raw["max_inline_comments"], int, "posting.max_inline_comments")
 
@@ -117,6 +132,18 @@ def load_config(path: Path | None = None) -> Config:
             ),
             include_neighbors=context_raw.get("include_neighbors", ContextConfig.include_neighbors),
             ignore_globs=context_raw.get("ignore_globs") or ContextConfig().ignore_globs,
+            # Unlike ignore_globs above, an explicit empty list here is a
+            # real, meaningful setting (disable project-standards context
+            # entirely) rather than "unset" -- plain `or` would collapse it
+            # back to the default, so check for None specifically instead.
+            # Absent and explicit null (`project_standards_files:` with no
+            # value) both mean "unset" and fall back to the default; only a
+            # present, non-null value (including []) is treated as explicit.
+            project_standards_files=(
+                context_raw["project_standards_files"]
+                if context_raw.get("project_standards_files") is not None
+                else ContextConfig().project_standards_files
+            ),
         ),
         posting=PostingConfig(
             min_confidence=posting_raw.get("min_confidence", PostingConfig.min_confidence),

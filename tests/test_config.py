@@ -88,6 +88,7 @@ def test_load_config_rejects_wrong_types(tmp_path):
         ("context:\n  max_files: thirty\n", "context.max_files"),
         ("context:\n  max_bytes_per_file: big\n", "context.max_bytes_per_file"),
         ("context:\n  ignore_globs: '*.log'\n", "context.ignore_globs"),
+        ("context:\n  project_standards_files: CLAUDE.md\n", "context.project_standards_files"),
         ("posting:\n  max_inline_comments: ten\n", "posting.max_inline_comments"),
     ]
     for yaml_text, key in cases:
@@ -95,3 +96,24 @@ def test_load_config_rejects_wrong_types(tmp_path):
         path.write_text(yaml_text)
         with pytest.raises(ValueError, match=key):
             load_config(path)
+
+
+def test_project_standards_files_defaults_to_claude_and_agents_md():
+    assert Config().context.project_standards_files == ["CLAUDE.md", "AGENTS.md"]
+
+
+def test_project_standards_files_explicit_empty_list_disables_it(tmp_path):
+    path = tmp_path / "config.yml"
+    path.write_text("context:\n  project_standards_files: []\n")
+    assert load_config(path).context.project_standards_files == []
+
+
+def test_project_standards_files_null_falls_back_to_default_instead_of_crashing(tmp_path):
+    # Regression test: a bare "project_standards_files:" (YAML null) is the
+    # natural way to try to unset the key, mirroring how ignore_globs treats
+    # null as unset -- assigning the None straight through used to reach
+    # gather.py's `list(config.project_standards_files)` and crash every
+    # review with TypeError: 'NoneType' object is not iterable.
+    path = tmp_path / "config.yml"
+    path.write_text("context:\n  project_standards_files:\n")
+    assert load_config(path).context.project_standards_files == ["CLAUDE.md", "AGENTS.md"]

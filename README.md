@@ -108,7 +108,7 @@ the workflow, as shown below.
 **Anthropic**
 
 ``` yaml
-- uses: sibinms/argus@v1.2.33
+- uses: sibinms/argus@v1.2.34
   with:
     anthropic-api-key: ${{ secrets.ANTHROPIC_API_KEY }}
 ```
@@ -116,7 +116,7 @@ the workflow, as shown below.
 **OpenAI**
 
 ``` yaml
-- uses: sibinms/argus@v1.2.33
+- uses: sibinms/argus@v1.2.34
   env:
     OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
   with:
@@ -127,7 +127,7 @@ the workflow, as shown below.
 **Gemini**
 
 ``` yaml
-- uses: sibinms/argus@v1.2.33
+- uses: sibinms/argus@v1.2.34
   env:
     GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
   with:
@@ -138,7 +138,7 @@ the workflow, as shown below.
 **OpenRouter** — one key, hundreds of models across providers.
 
 ``` yaml
-- uses: sibinms/argus@v1.2.33
+- uses: sibinms/argus@v1.2.34
   env:
     OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
   with:
@@ -162,7 +162,7 @@ both are present, so a workflow-level pick always wins for a quick test.
 ### CLI
 
 ``` bash
-pip install "git+https://github.com/sibinms/argus.git@v1.2.33"
+pip install "git+https://github.com/sibinms/argus.git@v1.2.34"
 argus init
 
 export ANTHROPIC_API_KEY=...   # or OPENAI_API_KEY, GEMINI_API_KEY, ...
@@ -197,7 +197,7 @@ steps:
     args:
       - -c
       - |
-        pip install "git+https://github.com/sibinms/argus.git@v1.2.33"
+        pip install "git+https://github.com/sibinms/argus.git@v1.2.34"
         argus review \
           --github \
           --repo $$REPO_FULL_NAME \
@@ -266,6 +266,7 @@ Configure:
 -   Models
 -   Lenses
 -   Context limits
+-   Project standards files fed to every reviewer (`project_standards_files`)
 -   Confidence thresholds
 -   Review mode (shadow / active)
 -   Whether a clean PR gets a real **Approved** review (`approve_reviews`)
@@ -277,6 +278,20 @@ all — the Action's `lens-model`/`curator-model` inputs and the CLI's
 `--lens-model`/`--curator-model` flags override whatever `.argus/config.yml`
 says (or the defaults, if there's no file). Useful for a quick test of a
 different model; commit the config file once you've settled on one.
+
+### Project standards context
+
+If your repo has a `CLAUDE.md` or `AGENTS.md` at its root, Argus reads it (and
+follows any `@relative/path.md`-only line as an import, the same convention
+those files already use) and feeds the result to every lens, the curator, and
+the planner as this project's binding conventions — a lens can then cite a
+specific, stated rule from your own standards doc, not just its own general
+angle.
+
+It's read from the PR's **base branch**, never the PR's head — a PR can't
+rewrite its own review rules within the same diff being reviewed. Configure
+which files to read via `context.project_standards_files` (default
+`[CLAUDE.md, AGENTS.md]`); set it to `[]` to disable.
 
 ### Approving pull requests
 
