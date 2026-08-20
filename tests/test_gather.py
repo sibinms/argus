@@ -8,6 +8,7 @@ from github.GithubException import GithubException
 from argus.config import ContextConfig
 from argus.context.gather import (
     _MAX_PROJECT_STANDARDS_ATTEMPTS,
+    _format_languages,
     _is_relative_import,
     _resolve_project_standards,
     gather_github,
@@ -17,6 +18,100 @@ from argus.context.gather import (
 
 def _git(tmp_path, *args):
     subprocess.run(["git", *args], cwd=tmp_path, check=True, capture_output=True)
+
+
+def test_format_languages_ranks_and_rounds_by_share():
+    result = _format_languages({"Python": 850_000, "TypeScript": 90_000, "HTML": 60_000})
+    assert result == "85% Python, 9% TypeScript, 6% HTML"
+
+
+def test_format_languages_drops_shares_under_the_threshold():
+    # A stray 3-byte Dockerfile shouldn't show up next to the real stack.
+    result = _format_languages({"Python": 999_997, "Dockerfile": 3})
+    assert result == "100% Python"
+
+
+def test_format_languages_caps_the_list_for_a_polyglot_repo():
+    languages = {f"Lang{i}": 100 - i for i in range(10)}
+    result = _format_languages(languages)
+    assert len(result.split(", ")) == 6
+
+
+def test_format_languages_empty_dict_is_empty_string():
+    assert _format_languages({}) == ""
+
+
+def test_gather_github_includes_tech_stack_from_repo_languages(monkeypatch):
+    pr = MagicMock()
+    pr.title = "t"
+    pr.body = "b"
+    pr.head.sha = "s"
+    pr.get_files.return_value = []
+
+    repo = MagicMock()
+    repo.get_pull.return_value = pr
+    repo.get_languages.return_value = {"Python": 900, "TypeScript": 100}
+
+    gh = MagicMock()
+    gh.get_repo.return_value = repo
+    monkeypatch.setattr(github, "Github", lambda *a, **k: gh)
+
+    ctx = gather_github("o/r", 1, "tok", ContextConfig())
+
+    assert ctx.tech_stack == "90% Python, 10% TypeScript"
+
+
+def test_gather_github_tech_stack_survives_a_languages_api_failure(monkeypatch):
+    """Language detection is optional context, same as project standards --
+    a GithubException or network error fetching it must degrade to "" rather
+    than fail the whole review."""
+    pr = MagicMock()
+    pr.title = "t"
+    pr.body = "b"
+    pr.head.sha = "s"
+    pr.get_files.return_value = []
+
+    repo = MagicMock()
+    repo.get_pull.return_value = pr
+    repo.get_languages.side_effect = GithubException(503, data={}, headers=None)
+
+    gh = MagicMock()
+    gh.get_repo.return_value = repo
+    monkeypatch.setattr(github, "Github", lambda *a, **k: gh)
+
+    ctx = gather_github("o/r", 1, "tok", ContextConfig())
+
+    assert ctx.tech_stack == ""
+
+
+def test_gather_github_tech_stack_disabled_skips_the_api_call(monkeypatch):
+    pr = MagicMock()
+    pr.title = "t"
+    pr.body = "b"
+    pr.head.sha = "s"
+    pr.get_files.return_value = []
+
+    repo = MagicMock()
+    repo.get_pull.return_value = pr
+
+    gh = MagicMock()
+    gh.get_repo.return_value = repo
+    monkeypatch.setattr(github, "Github", lambda *a, **k: gh)
+
+    ctx = gather_github("o/r", 1, "tok", ContextConfig(tech_stack=False))
+
+    assert ctx.tech_stack == ""
+    repo.get_languages.assert_not_called()
+
+
+def test_gather_local_never_sets_tech_stack(monkeypatch):
+    # gather_local has no GitHub API to ask -- always "" regardless of config.
+    monkeypatch.setattr(
+        "subprocess.run",
+        lambda *a, **k: MagicMock(stdout=""),
+    )
+    ctx = gather_local("base", "head", ContextConfig())
+    assert ctx.tech_stack == ""
 
 
 def test_gather_github_handles_get_contents_failure(monkeypatch):

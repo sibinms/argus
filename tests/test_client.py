@@ -114,6 +114,32 @@ def test_pr_summary_absent_when_empty():
     assert "Review brief" not in prompt
 
 
+def test_tech_stack_appears_in_context_prompt():
+    ctx = Context(diff="+x", changed_files=[], tech_stack="87% Python, 9% TypeScript")
+    prompt = _context_prompt(ctx, "m", "sys")
+    assert "# Tech stack" in prompt
+    assert "87% Python, 9% TypeScript" in prompt
+
+
+def test_tech_stack_absent_when_empty():
+    ctx = Context(diff="+x", changed_files=[], tech_stack="")
+    prompt = _context_prompt(ctx, "m", "sys")
+    assert "# Tech stack" not in prompt
+
+
+def test_generate_pr_summary_includes_tech_stack_in_prompt(monkeypatch):
+    captured = {}
+
+    def fake_completion(**kwargs):
+        captured["messages"] = kwargs["messages"]
+        return _fake_completion("## Intent\nAdds a feature.")(**kwargs)
+
+    monkeypatch.setattr("argus.models.client.completion", fake_completion)
+    ctx = Context(diff="+x", changed_files=[], tech_stack="87% Python, 9% TypeScript")
+    generate_pr_summary(ctx, "model")
+    assert "# Tech stack" in captured["messages"][1]["content"]
+
+
 def test_generate_pr_summary_returns_model_output(monkeypatch):
     monkeypatch.setattr(
         "argus.models.client.completion", _fake_completion("## Intent\nAdds a feature.")

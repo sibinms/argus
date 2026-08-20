@@ -267,6 +267,7 @@ Configure:
 -   Lenses
 -   Context limits
 -   Project standards files fed to every reviewer (`project_standards_files`)
+-   Tech stack context pulled from GitHub (`tech_stack`)
 -   Confidence thresholds
 -   Review mode (shadow / active)
 -   Whether a clean PR gets a real **Approved** review (`approve_reviews`)
@@ -292,6 +293,20 @@ It's read from the PR's **base branch**, never the PR's head — a PR can't
 rewrite its own review rules within the same diff being reviewed. Configure
 which files to read via `context.project_standards_files` (default
 `[CLAUDE.md, AGENTS.md]`); set it to `[]` to disable.
+
+### Tech stack context
+
+Running via the Action, Argus fetches the repo's language breakdown from
+GitHub (`GET /repos/{owner}/{repo}/languages`) and feeds it to every lens, the
+curator, and the planner as a one-line fact — e.g. `87% Python, 9%
+TypeScript`. It's cheap signal, not a framework guess: bytes-per-language,
+not "this is Django" — but it steers a lens's generic advice toward what the
+stack actually makes a real footgun, instead of treating every diff the same
+regardless of language.
+
+GitHub-only: running locally against a git checkout (`gather_local`) has no
+API to ask, so this is always empty there. Set `context.tech_stack: false` to
+disable it.
 
 ### Approving pull requests
 
