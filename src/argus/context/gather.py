@@ -78,6 +78,10 @@ class Context:
     # concatenated — see _resolve_project_standards. Empty if none exist or
     # context.project_standards_files is set to [].
     project_standards: str = ""
+    # GitHub's own language breakdown for the repo, e.g. "87% Python, 9%
+    # TypeScript" — see _detect_tech_stack. Empty on gather_local (no API to
+    # ask) or if context.tech_stack is False.
+    tech_stack: str = ""
 
 
 def _read_file(path: str) -> str | None:
@@ -133,6 +137,32 @@ def _resolve_project_standards(
             if match and _is_relative_import(match.group(1)):
                 queue.append(match.group(1))
     return "\n\n".join(parts)
+
+
+_MIN_LANGUAGE_SHARE_PERCENT = 1
+_MAX_LANGUAGES_SHOWN = 6
+
+
+def _format_languages(languages: dict[str, int]) -> str:
+    """Turns GitHub's bytes-per-language breakdown into a short, human line
+    like "87% Python, 9% TypeScript". Languages under
+    _MIN_LANGUAGE_SHARE_PERCENT are dropped as noise (a repo's one stray
+    Dockerfile shouldn't show up next to its actual stack), and the list is
+    capped at _MAX_LANGUAGES_SHOWN so a polyglot monorepo doesn't turn into
+    an unreadable wall of percentages."""
+    total = sum(languages.values())
+    if total <= 0:
+        return ""
+    ranked = sorted(languages.items(), key=lambda kv: kv[1], reverse=True)
+    parts = []
+    for name, size in ranked:
+        pct = round(size / total * 100)
+        if pct < _MIN_LANGUAGE_SHARE_PERCENT:
+            continue
+        parts.append(f"{pct}% {name}")
+        if len(parts) == _MAX_LANGUAGES_SHOWN:
+            break
+    return ", ".join(parts)
 
 
 def gather_local(base_ref: str, head_ref: str, config: ContextConfig) -> Context:
@@ -241,6 +271,19 @@ def gather_github(
     gh = Github(token, timeout=30)
     repo = gh.get_repo(repo_full_name)
     pr = repo.get_pull(pr_number)
+
+    tech_stack = ""
+    if config.tech_stack:
+        # Optional context, same treatment as project standards: a rate
+        # limit, a network blip, or the endpoint being unreachable for
+        # whatever reason degrades to "" rather than failing the whole
+        # review over a nice-to-have.
+        try:
+            tech_stack = _format_languages(repo.get_languages())
+        except GithubException:
+            logger.debug("couldn't fetch repo languages", exc_info=True)
+        except OSError:
+            logger.debug("couldn't fetch repo languages (network error)", exc_info=True)
 
     def _fetch_content(path: str, ref: str, *, strict: bool = False) -> str | None:
         # Shared by the changed-file loop and the project-standards fetch
@@ -387,4 +430,5 @@ def gather_github(
         pr_body=pr.body or "",
         changed_paths=changed_paths,
         project_standards=project_standards,
+        tech_stack=tech_stack,
     )

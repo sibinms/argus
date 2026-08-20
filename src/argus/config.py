@@ -52,6 +52,13 @@ class ContextConfig:
     # reaches Argus the same way it reaches a human or another agent. Set to
     # an empty list to disable.
     project_standards_files: list[str] = field(default_factory=lambda: ["CLAUDE.md", "AGENTS.md"])
+    # Fetches the repo's language breakdown from GitHub (bytes per language,
+    # e.g. "87% Python, 9% TypeScript") and feeds it to every lens, the
+    # curator, and the planner as a one-line "# Tech stack" section — cheap
+    # signal that steers generic advice toward what the stack actually makes
+    # a real footgun. GitHub-only: gather_local has no API to ask, so this is
+    # always "" there regardless of the setting. Set to False to disable.
+    tech_stack: bool = True
 
 
 @dataclass
@@ -108,6 +115,8 @@ def load_config(path: Path | None = None) -> Config:
         _require_type(context_raw["max_bytes_per_file"], int, "context.max_bytes_per_file")
     if "ignore_globs" in context_raw and context_raw["ignore_globs"] is not None:
         _require_type(context_raw["ignore_globs"], list, "context.ignore_globs")
+    if "tech_stack" in context_raw:
+        _require_type(context_raw["tech_stack"], bool, "context.tech_stack")
     if (
         "project_standards_files" in context_raw
         and context_raw["project_standards_files"] is not None
@@ -131,6 +140,7 @@ def load_config(path: Path | None = None) -> Config:
                 "max_bytes_per_file", ContextConfig.max_bytes_per_file
             ),
             include_neighbors=context_raw.get("include_neighbors", ContextConfig.include_neighbors),
+            tech_stack=context_raw.get("tech_stack", ContextConfig.tech_stack),
             ignore_globs=context_raw.get("ignore_globs") or ContextConfig().ignore_globs,
             # Unlike ignore_globs above, an explicit empty list here is a
             # real, meaningful setting (disable project-standards context

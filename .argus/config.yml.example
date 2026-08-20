@@ -58,6 +58,12 @@ context:
   project_standards_files:
     - CLAUDE.md
     - AGENTS.md
+  # Fetches the repo's language breakdown from GitHub (e.g. "87% Python, 9%
+  # TypeScript") and gives every lens, the curator, and the planner a
+  # one-line "# Tech stack" section — steers generic advice toward what the
+  # stack actually makes a real footgun. GitHub-only; no effect running
+  # locally against a git checkout. Set to false to disable.
+  tech_stack: true
 
 posting:
   min_confidence: medium   # low | medium | high

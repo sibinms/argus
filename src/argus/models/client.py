@@ -152,6 +152,8 @@ def generate_pr_summary(context: Context, model: str) -> str:
         parts.append(f"# PR title\n{context.pr_title}")
     if context.pr_body:
         parts.append(f"# PR description\n{context.pr_body}")
+    if context.tech_stack:
+        parts.append(f"# Tech stack\n{context.tech_stack}")
     diff_part = f"# Diff\n```diff\n{context.diff}\n```"
 
     # Unlike _context_prompt, there's no list of files to progressively trim
@@ -203,6 +205,11 @@ def _context_prompt(context: Context, model: str, system_prompt: str) -> str:
         fixed_parts.append(f"# PR title\n{context.pr_title}")
     if context.pr_body:
         fixed_parts.append(f"# PR description\n{context.pr_body}")
+    if context.tech_stack:
+        # A one-line "87% Python, 9% TypeScript" fact, not a droppable
+        # nice-to-have doc — keep it with the other fixed parts rather than
+        # in the standards/file budget below.
+        fixed_parts.append(f"# Tech stack\n{context.tech_stack}")
     if context.pr_summary:
         fixed_parts.append(f"# Review brief\n{context.pr_summary}")
     fixed_parts.append(f"# Diff\n```diff\n{context.diff}\n```")
