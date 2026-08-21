@@ -11,7 +11,7 @@ from __future__ import annotations
 import logging
 import re
 import subprocess  # nosec B404 - only used to shell out to git with a fixed argv list
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 
 from argus.config import ContextConfig
@@ -143,17 +143,25 @@ _MIN_LANGUAGE_SHARE_PERCENT = 1
 _MAX_LANGUAGES_SHOWN = 6
 
 
-def _format_languages(languages: dict[str, int]) -> str:
+def _format_languages(languages: Mapping[str, object]) -> str:
     """Turns GitHub's bytes-per-language breakdown into a short, human line
     like "87% Python, 9% TypeScript". Languages under
     _MIN_LANGUAGE_SHARE_PERCENT are dropped as noise (a repo's one stray
     Dockerfile shouldn't show up next to its actual stack), and the list is
     capped at _MAX_LANGUAGES_SHOWN so a polyglot monorepo doesn't turn into
-    an unreadable wall of percentages."""
-    total = sum(languages.values())
+    an unreadable wall of percentages.
+
+    PyGithub's get_languages() is typed dict[str, int], but in practice the
+    dict it returns also carries a "url" entry (the request URL, as a str)
+    alongside the real language keys -- found live via Argus's own
+    self-review of the PR that introduced this function (see #75). Every
+    non-int value is dropped rather than special-cased on the key "url"
+    specifically, so any other surprise metadata key behaves the same way."""
+    sizes = {name: size for name, size in languages.items() if isinstance(size, int)}
+    total = sum(sizes.values())
     if total <= 0:
         return ""
-    ranked = sorted(languages.items(), key=lambda kv: kv[1], reverse=True)
+    ranked = sorted(sizes.items(), key=lambda kv: kv[1], reverse=True)
     parts = []
     for name, size in ranked:
         pct = round(size / total * 100)

@@ -37,6 +37,20 @@ def test_format_languages_caps_the_list_for_a_polyglot_repo():
     assert len(result.split(", ")) == 6
 
 
+def test_format_languages_ignores_pygithubs_injected_url_key():
+    # Regression test (#75): PyGithub's get_languages() is typed
+    # dict[str, int], but in practice also returns a "url" entry (the
+    # request URL, as a str) alongside the real language keys -- summing
+    # that in with sum(languages.values()) crashed with
+    # "TypeError: unsupported operand type(s) for +: 'int' and 'str'" on
+    # this function's very first live run, caught by Argus's own
+    # self-review of this PR.
+    result = _format_languages(
+        {"Python": 234_737, "url": "https://api.github.com/repos/o/r/languages"}
+    )
+    assert result == "100% Python"
+
+
 def test_format_languages_empty_dict_is_empty_string():
     assert _format_languages({}) == ""
 
@@ -50,7 +64,14 @@ def test_gather_github_includes_tech_stack_from_repo_languages(monkeypatch):
 
     repo = MagicMock()
     repo.get_pull.return_value = pr
-    repo.get_languages.return_value = {"Python": 900, "TypeScript": 100}
+    # Includes PyGithub's real-world "url" entry (see
+    # test_format_languages_ignores_pygithubs_injected_url_key) so this
+    # exercises gather_github's actual production shape, not an idealized one.
+    repo.get_languages.return_value = {
+        "Python": 900,
+        "TypeScript": 100,
+        "url": "https://api.github.com/repos/o/r/languages",
+    }
 
     gh = MagicMock()
     gh.get_repo.return_value = repo
