@@ -40,6 +40,13 @@ lenses:
 context:
   max_files: 15
   max_bytes_per_file: 20000
+  # Hard ceiling on the diff itself, in bytes — independent of max_files and
+  # max_bytes_per_file above, which only bound the optional full-file dumps.
+  # A PR whose diff exceeds this gets cut at a whole-file boundary (never
+  # mid-hunk) rather than sent to the model uncapped, which matters most on
+  # a merge-commit head (skips the incremental diff, reviews the full base
+  # diff) or a very large PR — see gather.py's truncate_diff_parts.
+  max_diff_bytes: 200000
   include_neighbors: false   # off by default — usage context caused false reassurance in testing
   ignore_globs:
     - "*.lock"

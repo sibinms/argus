@@ -11,6 +11,7 @@ from argus.context.gather import (
     _format_languages,
     _is_relative_import,
     _resolve_project_standards,
+    _split_diff_by_file,
     gather_github,
     gather_local,
 )
@@ -344,6 +345,37 @@ def test_gather_github_excludes_ignored_files_from_the_diff_itself(monkeypatch):
     assert "lockfile noise" not in ctx.diff
 
 
+def test_gather_github_truncates_an_oversized_diff(monkeypatch):
+    # Regression test (#78): a huge PR (many files, or a merge commit that
+    # skips the incremental diff and falls back to the full base diff) used
+    # to be sent to every lens completely uncapped when the configured
+    # model has no litellm pricing/context-window entry to trim against.
+    first = MagicMock()
+    first.filename = "a.py"
+    first.patch = "x" * 200
+    second = MagicMock()
+    second.filename = "b.py"
+    second.patch = "y" * 200
+
+    pr = MagicMock()
+    pr.title = "t"
+    pr.body = "b"
+    pr.head.sha = "s"
+    pr.get_files.return_value = [first, second]
+    repo = MagicMock()
+    repo.get_pull.return_value = pr
+    repo.get_contents.side_effect = GithubException(404, data={}, headers=None)
+    gh = MagicMock()
+    gh.get_repo.return_value = repo
+    monkeypatch.setattr(github, "Github", lambda *a, **k: gh)
+
+    ctx = gather_github("o/r", 1, "tok", ContextConfig(max_diff_bytes=150))
+
+    assert ctx.diff_truncated is True
+    assert "x" * 200 in ctx.diff
+    assert "y" * 200 not in ctx.diff
+
+
 def test_gather_github_does_not_fetch_content_for_ignored_files(monkeypatch):
     """apply_budget drops ignored files from changed_files entirely, so
     fetching their content is a wasted API call -- it must be skipped, not
@@ -670,6 +702,61 @@ def test_gather_local_sets_changed_paths(tmp_path, monkeypatch):
     ctx = gather_local("base", "HEAD", ContextConfig())
 
     assert ctx.changed_paths == ["app.py"]
+
+
+def test_split_diff_by_file_reconstructs_original_when_rejoined():
+    diff = "diff --git a/x b/x\n+1\ndiff --git a/y b/y\n+2\n"
+    parts = _split_diff_by_file(diff)
+    assert parts == ["diff --git a/x b/x\n+1", "diff --git a/y b/y\n+2\n"]
+    assert "\n".join(parts) == diff
+
+
+def test_split_diff_by_file_empty_string():
+    assert _split_diff_by_file("") == []
+
+
+def test_gather_local_truncates_an_oversized_diff(tmp_path, monkeypatch):
+    # Regression test (#78): a huge diff with no per-model budget available
+    # (an unmapped model, or none configured yet at gather time) used to be
+    # sent completely uncapped -- see truncate_diff_parts's docstring.
+    _git(tmp_path, "init", "-q")
+    _git(tmp_path, "config", "user.email", "t@example.com")
+    _git(tmp_path, "config", "user.name", "t")
+    (tmp_path / "a.py").write_text("old\n")
+    (tmp_path / "b.py").write_text("old\n")
+    _git(tmp_path, "add", "a.py", "b.py")
+    _git(tmp_path, "commit", "-qm", "init")
+    _git(tmp_path, "branch", "base")
+    (tmp_path / "a.py").write_text("x" * 200 + "\n")
+    (tmp_path / "b.py").write_text("y" * 200 + "\n")
+    _git(tmp_path, "add", "a.py", "b.py")
+    _git(tmp_path, "commit", "-qm", "change")
+
+    monkeypatch.chdir(tmp_path)
+    ctx = gather_local("base", "HEAD", ContextConfig(max_diff_bytes=150))
+
+    assert ctx.diff_truncated is True
+    assert "x" * 200 in ctx.diff
+    assert "y" * 200 not in ctx.diff
+
+
+def test_gather_local_diff_under_the_cap_is_not_truncated(tmp_path, monkeypatch):
+    _git(tmp_path, "init", "-q")
+    _git(tmp_path, "config", "user.email", "t@example.com")
+    _git(tmp_path, "config", "user.name", "t")
+    (tmp_path / "a.py").write_text("old\n")
+    _git(tmp_path, "add", "a.py")
+    _git(tmp_path, "commit", "-qm", "init")
+    _git(tmp_path, "branch", "base")
+    (tmp_path / "a.py").write_text("new\n")
+    _git(tmp_path, "add", "a.py")
+    _git(tmp_path, "commit", "-qm", "change")
+
+    monkeypatch.chdir(tmp_path)
+    ctx = gather_local("base", "HEAD", ContextConfig())
+
+    assert ctx.diff_truncated is False
+    assert "new" in ctx.diff
 
 
 def test_gather_local_excludes_ignored_files_from_the_diff_itself(tmp_path, monkeypatch):

@@ -17,6 +17,14 @@ def test_approve_reviews_defaults_off_and_loads_when_set(tmp_path):
     assert load_config(path).posting.approve_reviews is True
 
 
+def test_max_diff_bytes_default_and_loads(tmp_path):
+    assert Config().context.max_diff_bytes == 200_000
+
+    path = tmp_path / "config.yml"
+    path.write_text("context:\n  max_diff_bytes: 500\n")
+    assert load_config(path).context.max_diff_bytes == 500
+
+
 def test_tech_stack_defaults_on_and_loads_when_disabled(tmp_path):
     assert Config().context.tech_stack is True
 
@@ -98,6 +106,7 @@ def test_load_config_rejects_wrong_types(tmp_path):
         ("context:\n  ignore_globs: '*.log'\n", "context.ignore_globs"),
         ("context:\n  project_standards_files: CLAUDE.md\n", "context.project_standards_files"),
         ("context:\n  tech_stack: yes-please\n", "context.tech_stack"),
+        ("context:\n  max_diff_bytes: big\n", "context.max_diff_bytes"),
         ("posting:\n  max_inline_comments: ten\n", "posting.max_inline_comments"),
     ]
     for yaml_text, key in cases:

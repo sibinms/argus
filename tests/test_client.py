@@ -1,4 +1,5 @@
 import json
+import time
 from unittest.mock import MagicMock
 
 import pytest
@@ -71,6 +72,29 @@ def test_complete_sets_a_request_timeout(monkeypatch):
     assert captured.get("timeout")
 
 
+def test_complete_raises_on_a_stuck_call_past_the_wall_clock_ceiling(monkeypatch):
+    # Regression test (#78): completion()'s own timeout= isn't reliably
+    # enforced for every provider/model combination -- a call stuck past it
+    # must still not hang the caller forever. _WALL_CLOCK_TIMEOUT patched
+    # tiny so this doesn't actually wait real minutes.
+    monkeypatch.setattr("argus.models.client._WALL_CLOCK_TIMEOUT", 0.05)
+
+    def fake_completion(**kwargs):
+        time.sleep(0.3)
+        resp = MagicMock()
+        resp.choices = [MagicMock()]
+        resp.choices[0].message.content = "[]"
+        return resp
+
+    monkeypatch.setattr("argus.models.client.completion", fake_completion)
+
+    start = time.monotonic()
+    with pytest.raises(TimeoutError, match="wall-clock ceiling"):
+        _complete("sys", "user", "m")
+    # Must return close to the patched ceiling, not wait for the stuck call.
+    assert time.monotonic() - start < 0.3
+
+
 def test_complete_defaults_openrouter_to_zero_data_retention(monkeypatch):
     captured = {}
 
@@ -138,6 +162,32 @@ def test_generate_pr_summary_includes_tech_stack_in_prompt(monkeypatch):
     ctx = Context(diff="+x", changed_files=[], tech_stack="87% Python, 9% TypeScript")
     generate_pr_summary(ctx, "model")
     assert "# Tech stack" in captured["messages"][1]["content"]
+
+
+def test_diff_truncated_adds_a_note_to_the_diff_header_in_context_prompt():
+    ctx = Context(diff="+x", changed_files=[], diff_truncated=True)
+    prompt = _context_prompt(ctx, "m", "sys")
+    assert "# Diff (truncated" in prompt
+
+
+def test_diff_not_truncated_omits_the_note_in_context_prompt():
+    ctx = Context(diff="+x", changed_files=[], diff_truncated=False)
+    prompt = _context_prompt(ctx, "m", "sys")
+    assert "# Diff\n" in prompt
+    assert "truncated" not in prompt
+
+
+def test_generate_pr_summary_includes_diff_truncated_note(monkeypatch):
+    captured = {}
+
+    def fake_completion(**kwargs):
+        captured["messages"] = kwargs["messages"]
+        return _fake_completion("brief")(**kwargs)
+
+    monkeypatch.setattr("argus.models.client.completion", fake_completion)
+    ctx = Context(diff="+x", changed_files=[], diff_truncated=True)
+    generate_pr_summary(ctx, "model")
+    assert "# Diff (truncated" in captured["messages"][1]["content"]
 
 
 def test_generate_pr_summary_returns_model_output(monkeypatch):

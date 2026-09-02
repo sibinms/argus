@@ -308,6 +308,36 @@ GitHub-only: running locally against a git checkout (`gather_local`) has no
 API to ask, so this is always empty there. Set `context.tech_stack: false` to
 disable it.
 
+### Very large PRs
+
+The diff itself has a hard ceiling, `context.max_diff_bytes` (default
+`200000`), independent of `max_files`/`max_bytes_per_file` above — those only
+bound the optional full-file dumps a lens can additionally see, not the diff
+that's always included. A PR whose diff exceeds it is cut at a whole-file
+boundary, never mid-hunk, and every prompt's `# Diff` section is marked
+`(truncated — this PR's diff was too large to include in full)` so a lens
+doesn't mistake a partial diff for the complete picture.
+
+This matters most on a PR whose head is a merge commit (skips the
+incremental-diff optimization and falls back to reviewing the full base
+diff — see the "head is a merge commit" warning in the logs) or a genuinely
+huge PR (hundreds of changed files): without this cap, the prompt sent to
+the model has no upper bound at all when the configured `lens-model`/
+`curator-model` isn't one litellm has pricing/context-window metadata for
+(a brand-new or custom model string) — the per-model token-budget check
+silently no-ops in that case, since it has nothing to trim against, and a
+large enough diff can then produce a multi-minute-plus model call that
+hangs the whole review. `max_diff_bytes` bounds the prompt regardless of
+whether the model is one litellm recognizes.
+
+As defense in depth on top of that: every model call also has a 180-second
+wall-clock ceiling independent of `completion()`'s own `timeout=` kwarg,
+which isn't reliably honored for every provider/model combination. A call
+stuck past it fails with a clear `TimeoutError` (a lens gets skipped and
+logged, the same as any other lens failure; a stuck curator call fails the
+whole run loudly, since there's no partial-curation fallback) instead of
+hanging indefinitely with no error and no progress.
+
 ### Approving pull requests
 
 By default Argus posts its verdict as a comment. To have a clean PR receive a

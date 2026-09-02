@@ -20,6 +20,8 @@ from __future__ import annotations
 
 import json
 import logging
+from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import TimeoutError as FutureTimeoutError
 
 from litellm import completion, get_model_info, token_counter
 
@@ -33,6 +35,19 @@ logger = logging.getLogger(__name__)
 # (e.g. most non-OpenAI providers), so leave headroom rather than trimming
 # right up to the reported limit.
 _INPUT_TOKEN_SAFETY_MARGIN = 0.9
+
+# A hard wall-clock ceiling on top of completion()'s own timeout= kwarg, not
+# a replacement for it. Larger than that 120s so a normal slow-but-working
+# call clears it first -- this is only meant to catch the case where
+# litellm's timeout doesn't fire at all: see #78, where a model string
+# litellm has no pricing/context-window metadata for (a custom or very new
+# provider model) combined with an unusually large prompt to hang a review
+# for 20+ minutes with no error and no progress, until someone gave up and
+# cancelled the run by hand. ThreadPoolExecutor.result(timeout=...) can't
+# kill the underlying call if it's still stuck past this ceiling -- the
+# request keeps running in its own thread -- but it stops that one call from
+# blocking the rest of the review indefinitely, which is the actual goal.
+_WALL_CLOCK_TIMEOUT = 180
 
 
 def _max_input_tokens(model: str) -> int | None:
@@ -154,7 +169,8 @@ def generate_pr_summary(context: Context, model: str) -> str:
         parts.append(f"# PR description\n{context.pr_body}")
     if context.tech_stack:
         parts.append(f"# Tech stack\n{context.tech_stack}")
-    diff_part = f"# Diff\n```diff\n{context.diff}\n```"
+    diff_note = " (truncated — this PR's diff was too large to include in full)"
+    diff_part = f"# Diff{diff_note if context.diff_truncated else ''}\n```diff\n{context.diff}\n```"
 
     # Unlike _context_prompt, there's no list of files to progressively trim
     # here -- just a binary call on whether standards fit at all. Standards
@@ -212,7 +228,10 @@ def _context_prompt(context: Context, model: str, system_prompt: str) -> str:
         fixed_parts.append(f"# Tech stack\n{context.tech_stack}")
     if context.pr_summary:
         fixed_parts.append(f"# Review brief\n{context.pr_summary}")
-    fixed_parts.append(f"# Diff\n```diff\n{context.diff}\n```")
+    diff_note = " (truncated — this PR's diff was too large to include in full)"
+    fixed_parts.append(
+        f"# Diff{diff_note if context.diff_truncated else ''}\n```diff\n{context.diff}\n```"
+    )
 
     # More broadly useful than any one changed file's full content, but
     # still dropped before ever touching fixed_parts -- a repo's standards
@@ -279,16 +298,34 @@ def _complete(system_prompt: str, user_prompt: str, model: str) -> str:
         # never depend on someone remembering to opt in.
         kwargs["extra_body"] = {"provider": {"zdr": True, "data_collection": "deny"}}
 
-    response = completion(
-        model=model,
-        messages=[
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_prompt},
-        ],
-        timeout=120,  # never let a stalled provider hang the whole review
-        **kwargs,
-    )
-    return response.choices[0].message.content or ""
+    def _call() -> str:
+        response = completion(
+            model=model,
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt},
+            ],
+            timeout=120,  # never let a stalled provider hang the whole review
+            **kwargs,
+        )
+        return response.choices[0].message.content or ""
+
+    # See _WALL_CLOCK_TIMEOUT's own comment for why this wraps completion()'s
+    # timeout= rather than trusting it alone. Deliberately not a `with`
+    # block: ThreadPoolExecutor's __exit__ calls shutdown(wait=True), which
+    # would block returning/raising here until the stuck call finishes --
+    # exactly what this wrapper exists to avoid. shutdown(wait=False) below
+    # abandons that thread to finish or die on its own instead.
+    pool = ThreadPoolExecutor(max_workers=1)
+    future = pool.submit(_call)
+    try:
+        return future.result(timeout=_WALL_CLOCK_TIMEOUT)
+    except FutureTimeoutError:
+        raise TimeoutError(
+            f"call to {model} exceeded the {_WALL_CLOCK_TIMEOUT}s wall-clock ceiling"
+        ) from None
+    finally:
+        pool.shutdown(wait=False)
 
 
 def _coerce_line(value: object) -> int | None:

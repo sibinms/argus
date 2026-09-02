@@ -33,6 +33,11 @@ class ModelConfig:
 class ContextConfig:
     max_files: int = 15
     max_bytes_per_file: int = 20_000
+    # Hard ceiling on the diff itself, in bytes, independent of whether the
+    # configured model is one litellm has pricing/context-window metadata
+    # for -- see truncate_diff_parts's docstring in context/budget.py for
+    # why this can't be left to the per-model token-budget check alone.
+    max_diff_bytes: int = 200_000
     include_neighbors: bool = False
     ignore_globs: list[str] = field(
         default_factory=lambda: [
@@ -113,6 +118,8 @@ def load_config(path: Path | None = None) -> Config:
         _require_type(context_raw["max_files"], int, "context.max_files")
     if "max_bytes_per_file" in context_raw:
         _require_type(context_raw["max_bytes_per_file"], int, "context.max_bytes_per_file")
+    if "max_diff_bytes" in context_raw:
+        _require_type(context_raw["max_diff_bytes"], int, "context.max_diff_bytes")
     if "ignore_globs" in context_raw and context_raw["ignore_globs"] is not None:
         _require_type(context_raw["ignore_globs"], list, "context.ignore_globs")
     if "tech_stack" in context_raw:
@@ -139,6 +146,7 @@ def load_config(path: Path | None = None) -> Config:
             max_bytes_per_file=context_raw.get(
                 "max_bytes_per_file", ContextConfig.max_bytes_per_file
             ),
+            max_diff_bytes=context_raw.get("max_diff_bytes", ContextConfig.max_diff_bytes),
             include_neighbors=context_raw.get("include_neighbors", ContextConfig.include_neighbors),
             tech_stack=context_raw.get("tech_stack", ContextConfig.tech_stack),
             ignore_globs=context_raw.get("ignore_globs") or ContextConfig().ignore_globs,

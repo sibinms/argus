@@ -15,7 +15,7 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 
 from argus.config import ContextConfig
-from argus.context.budget import apply_budget, is_ignored
+from argus.context.budget import apply_budget, is_ignored, truncate_diff_parts
 
 logger = logging.getLogger(__name__)
 
@@ -82,6 +82,9 @@ class Context:
     # TypeScript" — see _detect_tech_stack. Empty on gather_local (no API to
     # ask) or if context.tech_stack is False.
     tech_stack: str = ""
+    # True when the diff exceeded context.max_diff_bytes and was cut at a
+    # file boundary — see truncate_diff_parts in context/budget.py.
+    diff_truncated: bool = False
 
 
 def _read_file(path: str) -> str | None:
@@ -173,6 +176,18 @@ def _format_languages(languages: Mapping[str, object]) -> str:
     return ", ".join(parts)
 
 
+def _split_diff_by_file(diff: str) -> list[str]:
+    """Splits a raw multi-file `git diff` blob back into one chunk per file,
+    on the "diff --git a/... b/..." boundary each file's section starts
+    with -- the same boundary truncate_diff_parts trims at, so gather_local
+    can reuse it despite git producing one joined string instead of
+    gather_github's already-separate per-file patches."""
+    if not diff:
+        return []
+    chunks = diff.split("\ndiff --git ")
+    return [chunks[0]] + [f"diff --git {c}" for c in chunks[1:]]
+
+
 def gather_local(base_ref: str, head_ref: str, config: ContextConfig) -> Context:
     """Diffs head_ref against base_ref in the current git checkout."""
     # Fixed argv list, no shell interpolation; "git" is resolved via PATH by design.
@@ -204,6 +219,11 @@ def gather_local(base_ref: str, head_ref: str, config: ContextConfig) -> Context
         ).stdout
     else:
         diff = ""
+
+    diff_parts, diff_truncated = truncate_diff_parts(
+        _split_diff_by_file(diff), config.max_diff_bytes
+    )
+    diff = "\n".join(diff_parts)
 
     files = [ChangedFile(path=p, content=_read_file(p)) for p in changed_paths]
     files = apply_budget(files, config)
@@ -251,11 +271,20 @@ def gather_local(base_ref: str, head_ref: str, config: ContextConfig) -> Context
     # file in the raw diff -- an ignored file's hunk is never in `diff`, so
     # counting it as touched would let posting wrongly resolve a still-open
     # finding on a file the lens was never shown this run.
+    #
+    # Known trade-off: changed_paths isn't narrowed further when
+    # diff_truncated is True -- a file whose hunk got cut still counts as
+    # "touched" here even though its diff wasn't in what a lens actually
+    # read, because its full content may still have made it into
+    # changed_files below (subject to apply_budget's own separate cap) even
+    # without its diff hunk. Only matters on the rare PR big enough to hit
+    # max_diff_bytes at all.
     return Context(
         diff=diff,
         changed_files=files,
         changed_paths=included_paths,
         project_standards=project_standards,
+        diff_truncated=diff_truncated,
     )
 
 
@@ -424,6 +453,11 @@ def gather_github(
     changed_paths = [f.path for f in files]
     files = apply_budget(files, config)
 
+    # See gather_local's identical trade-off note: changed_paths isn't
+    # narrowed to exclude a file whose diff hunk got truncated away here --
+    # its full content may still have made it into `files` above regardless.
+    diff_parts, diff_truncated = truncate_diff_parts(diff_parts, config.max_diff_bytes)
+
     # pr.base.sha, not pr.head.sha -- a PR shouldn't be able to rewrite its
     # own review rules within the same diff being reviewed.
     project_standards = _resolve_project_standards(
@@ -439,4 +473,5 @@ def gather_github(
         changed_paths=changed_paths,
         project_standards=project_standards,
         tech_stack=tech_stack,
+        diff_truncated=diff_truncated,
     )
