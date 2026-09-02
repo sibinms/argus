@@ -73,7 +73,7 @@ def test_complete_sets_a_request_timeout(monkeypatch):
 
 
 def test_complete_raises_on_a_stuck_call_past_the_wall_clock_ceiling(monkeypatch):
-    # Regression test (#78): completion()'s own timeout= isn't reliably
+    # Regression test (#79): completion()'s own timeout= isn't reliably
     # enforced for every provider/model combination -- a call stuck past it
     # must still not hang the caller forever. _WALL_CLOCK_TIMEOUT patched
     # tiny so this doesn't actually wait real minutes.

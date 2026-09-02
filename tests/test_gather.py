@@ -346,7 +346,7 @@ def test_gather_github_excludes_ignored_files_from_the_diff_itself(monkeypatch):
 
 
 def test_gather_github_truncates_an_oversized_diff(monkeypatch):
-    # Regression test (#78): a huge PR (many files, or a merge commit that
+    # Regression test (#79): a huge PR (many files, or a merge commit that
     # skips the incremental diff and falls back to the full base diff) used
     # to be sent to every lens completely uncapped when the configured
     # model has no litellm pricing/context-window entry to trim against.
@@ -716,7 +716,7 @@ def test_split_diff_by_file_empty_string():
 
 
 def test_gather_local_truncates_an_oversized_diff(tmp_path, monkeypatch):
-    # Regression test (#78): a huge diff with no per-model budget available
+    # Regression test (#79): a huge diff with no per-model budget available
     # (an unmapped model, or none configured yet at gather time) used to be
     # sent completely uncapped -- see truncate_diff_parts's docstring.
     _git(tmp_path, "init", "-q")

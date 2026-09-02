@@ -28,7 +28,7 @@ def truncate_diff_parts(parts: list[str], max_bytes: int) -> tuple[list[str], bo
     Exists as a hard ceiling independent of _max_input_tokens's per-model
     budget check in models/client.py, which silently no-ops for any model
     litellm doesn't have pricing/context-window metadata for (a custom or
-    very new provider model string) -- see #78: that combination, on a
+    very new provider model string) -- see #79: that combination, on a
     266-file/14,644-line merge-commit PR, produced a completely uncapped
     prompt and hung a review for 20+ minutes until someone gave up and
     cancelled it by hand. This runs unconditionally at gather time, before

@@ -39,7 +39,7 @@ _INPUT_TOKEN_SAFETY_MARGIN = 0.9
 # A hard wall-clock ceiling on top of completion()'s own timeout= kwarg, not
 # a replacement for it. Larger than that 120s so a normal slow-but-working
 # call clears it first -- this is only meant to catch the case where
-# litellm's timeout doesn't fire at all: see #78, where a model string
+# litellm's timeout doesn't fire at all: see #79, where a model string
 # litellm has no pricing/context-window metadata for (a custom or very new
 # provider model) combined with an unusually large prompt to hang a review
 # for 20+ minutes with no error and no progress, until someone gave up and
