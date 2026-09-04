@@ -17,6 +17,48 @@ def test_approve_reviews_defaults_off_and_loads_when_set(tmp_path):
     assert load_config(path).posting.approve_reviews is True
 
 
+def test_model_fallbacks_default_to_a_non_empty_list():
+    # Ships with real defaults, not [] -- switching lens/curator to an
+    # openrouter/ model gets fallback protection with no extra config.
+    assert Config().models.lens_fallbacks
+    assert Config().models.curator_fallbacks
+    assert all(m.startswith("openrouter/") for m in Config().models.lens_fallbacks)
+    assert all(m.startswith("openrouter/") for m in Config().models.curator_fallbacks)
+
+
+def test_model_fallbacks_load_an_explicit_override(tmp_path):
+    path = tmp_path / "config.yml"
+    path.write_text(
+        "models:\n"
+        "  lens_fallbacks:\n"
+        "    - openrouter/a/b\n"
+        "  curator_fallbacks:\n"
+        "    - openrouter/c/d\n"
+    )
+    config = load_config(path)
+    assert config.models.lens_fallbacks == ["openrouter/a/b"]
+    assert config.models.curator_fallbacks == ["openrouter/c/d"]
+
+
+def test_model_fallbacks_explicit_empty_list_disables_them(tmp_path):
+    path = tmp_path / "config.yml"
+    path.write_text("models:\n  lens_fallbacks: []\n  curator_fallbacks: []\n")
+    config = load_config(path)
+    assert config.models.lens_fallbacks == []
+    assert config.models.curator_fallbacks == []
+
+
+def test_model_fallbacks_absent_key_falls_back_to_the_default(tmp_path):
+    # Regression guard: a plain `or []` here would wrongly collapse "key
+    # absent from this repo's config.yml" to [], discarding the shipped
+    # defaults for every repo that hasn't set this explicitly.
+    path = tmp_path / "config.yml"
+    path.write_text("models:\n  lens: claude-haiku-4-5\n")
+    config = load_config(path)
+    assert config.models.lens_fallbacks == Config().models.lens_fallbacks
+    assert config.models.curator_fallbacks == Config().models.curator_fallbacks
+
+
 def test_max_diff_bytes_default_and_loads(tmp_path):
     assert Config().context.max_diff_bytes == 200_000
 
@@ -107,6 +149,8 @@ def test_load_config_rejects_wrong_types(tmp_path):
         ("context:\n  project_standards_files: CLAUDE.md\n", "context.project_standards_files"),
         ("context:\n  tech_stack: yes-please\n", "context.tech_stack"),
         ("context:\n  max_diff_bytes: big\n", "context.max_diff_bytes"),
+        ("models:\n  lens_fallbacks: openrouter/a/b\n", "models.lens_fallbacks"),
+        ("models:\n  curator_fallbacks: openrouter/a/b\n", "models.curator_fallbacks"),
         ("posting:\n  max_inline_comments: ten\n", "posting.max_inline_comments"),
     ]
     for yaml_text, key in cases:

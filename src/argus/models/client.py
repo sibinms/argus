@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import json
 import logging
+from collections.abc import Sequence
 from concurrent.futures import ThreadPoolExecutor
 from concurrent.futures import TimeoutError as FutureTimeoutError
 
@@ -158,7 +159,7 @@ your job is to point their attention at what matters most.\
 """
 
 
-def generate_pr_summary(context: Context, model: str) -> str:
+def generate_pr_summary(context: Context, model: str, fallbacks: Sequence[str] = ()) -> str:
     """Runs the planner once before lenses fire. Returns a brief that is
     injected into every lens's context so each reviewer knows what the PR
     is trying to do and what invariants to verify."""
@@ -200,7 +201,7 @@ def generate_pr_summary(context: Context, model: str) -> str:
     parts.append(diff_part)
     user_prompt = "\n\n".join(parts)
     try:
-        return _complete(PLANNER_SYSTEM_PROMPT, user_prompt, model)
+        return _complete(PLANNER_SYSTEM_PROMPT, user_prompt, model, fallbacks)
     except Exception:
         # Lenses run fine without a brief, just with less shared context, so
         # this shouldn't fail the whole review — but log it so a planner
@@ -287,7 +288,37 @@ def _context_prompt(context: Context, model: str, system_prompt: str) -> str:
     return "\n\n".join(fixed_parts + standards_parts + file_parts)
 
 
-def _complete(system_prompt: str, user_prompt: str, model: str) -> str:
+def _openrouter_models_field(model: str, fallbacks: Sequence[str]) -> list[str] | None:
+    """Builds OpenRouter's own "models" fallback array: the primary model
+    first, then each configured fallback, in priority order. OpenRouter
+    tries the first, and automatically moves to the next on any error —
+    rate-limiting explicitly included — without a round trip back to us.
+    litellm's own retry/timeout handling in _complete has no visibility
+    into *why* a provider call failed, so it can't make this kind of
+    "try a different, healthier route" decision on its own; OpenRouter can,
+    since it's the one actually holding multiple backends for the same
+    model. See the team's own #argus-alerts incident: a model backed by
+    only a few backend routes (as opposed to e.g. an open-weight model with
+    a dozen-plus independent hosting providers) collapsed under shared-pool
+    rate limiting when several of those routes went unhealthy at once.
+
+    Model strings here use litellm's own "openrouter/" routing prefix
+    (e.g. "openrouter/anthropic/claude-3.5-haiku"), stripped before going
+    into the array — OpenRouter's own model slugs never carry it.
+
+    Returns None (send nothing) when there's no fallback to configure, or
+    when the primary model isn't routed through OpenRouter at all — this
+    is an OpenRouter-specific feature with no equivalent for other
+    providers, and sending an unrecognized "models" field to a provider
+    that doesn't understand it isn't guaranteed to be a harmless no-op."""
+    if not fallbacks or not model.startswith("openrouter/"):
+        return None
+    return [model.removeprefix("openrouter/")] + [f.removeprefix("openrouter/") for f in fallbacks]
+
+
+def _complete(
+    system_prompt: str, user_prompt: str, model: str, fallbacks: Sequence[str] = ()
+) -> str:
     kwargs: dict = {}
     if model.startswith("openrouter/"):
         # Argus sends PR diffs and file content off-repo on every call; for
@@ -297,6 +328,9 @@ def _complete(system_prompt: str, user_prompt: str, model: str) -> str:
         # and no training-data collection. Not configurable — this should
         # never depend on someone remembering to opt in.
         kwargs["extra_body"] = {"provider": {"zdr": True, "data_collection": "deny"}}
+        models_field = _openrouter_models_field(model, fallbacks)
+        if models_field is not None:
+            kwargs["extra_body"]["models"] = models_field
 
     def _call() -> str:
         response = completion(
@@ -344,9 +378,13 @@ def _coerce_line(value: object) -> int | None:
     return None
 
 
-def run_lens(lens: Lens, context: Context, model: str) -> list[Finding]:
+def run_lens(
+    lens: Lens, context: Context, model: str, fallbacks: Sequence[str] = ()
+) -> list[Finding]:
     system_prompt = lens.system_prompt()
-    text = _complete(system_prompt, _context_prompt(context, model, system_prompt), model)
+    text = _complete(
+        system_prompt, _context_prompt(context, model, system_prompt), model, fallbacks
+    )
 
     try:
         raw_findings = _extract_json(text)
@@ -462,7 +500,9 @@ order, with keys: action (keep|drop_noise|drop|downgrade), confidence \
 sentence), and evidence_quote (a real quote justifying a "drop", or null)."""
 
 
-def curate_with_model(findings: list[Finding], context: Context, model: str) -> list[dict]:
+def curate_with_model(
+    findings: list[Finding], context: Context, model: str, fallbacks: Sequence[str] = ()
+) -> list[dict]:
     if not findings:
         return []
 
@@ -487,7 +527,7 @@ def curate_with_model(findings: list[Finding], context: Context, model: str) -> 
         + "\n```"
     )
 
-    text = _complete(CURATOR_SYSTEM_PROMPT, user_prompt, model)
+    text = _complete(CURATOR_SYSTEM_PROMPT, user_prompt, model, fallbacks)
 
     try:
         decisions = _extract_json(text)

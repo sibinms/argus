@@ -20,6 +20,25 @@ models:
   # and set OPENROUTER_API_KEY:
   # lens: openrouter/anthropic/claude-3.5-haiku
   # curator: openrouter/anthropic/claude-3.5-sonnet
+  #
+  # OpenRouter-only: additional models OpenRouter automatically tries, in
+  # order, if the model above errors — including a rate limit, which is
+  # exactly what this is for. Prefer a model backed by many independent
+  # inference providers (an open-weight model typically has a dozen-plus;
+  # a single vendor's own closed model usually has just a handful) — more
+  # independent backends means more capacity for OpenRouter to route around
+  # when one of them is struggling. Has no effect unless the model above
+  # uses the openrouter/ prefix, so these are a no-op with the plain
+  # Anthropic models set above — they only kick in once lens/curator are
+  # switched to openrouter/. These are ModelConfig's actual defaults
+  # (baked into the tool itself, not just this example file) — override
+  # with your own list if a different fallback chain fits better, or set
+  # to [] to disable fallbacks entirely.
+  lens_fallbacks:
+    - openrouter/z-ai/glm-4.7-flash
+  curator_fallbacks:
+    - openrouter/meta-llama/llama-4-maverick
+    - openrouter/minimax/minimax-m2.5
 
 # Built-in lenses: security, tests, error_handling, contracts, correctness,
 # deleted_code, reuse, efficiency. A shared planner call runs first and

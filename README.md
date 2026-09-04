@@ -263,7 +263,7 @@ Use parameterized queries instead.
 
 Configure:
 
--   Models
+-   Models (and, for OpenRouter, fallback models: `lens_fallbacks`/`curator_fallbacks`)
 -   Lenses
 -   Context limits
 -   Project standards files fed to every reviewer (`project_standards_files`)
@@ -279,6 +279,37 @@ all — the Action's `lens-model`/`curator-model` inputs and the CLI's
 `--lens-model`/`--curator-model` flags override whatever `.argus/config.yml`
 says (or the defaults, if there's no file). Useful for a quick test of a
 different model; commit the config file once you've settled on one.
+
+### OpenRouter fallback models
+
+On OpenRouter, a model backed by only a handful of independent backend
+providers (a single vendor's own closed model, typically) is more exposed to
+shared-pool rate limiting than one backed by a dozen-plus — if a couple of
+those few backends go unhealthy at once, everyone routing through that model
+funnels onto whatever's left. `models.lens_fallbacks`/`models.curator_fallbacks`
+(each a list of `openrouter/`-prefixed model strings) get sent to OpenRouter
+as its own `models` fallback array alongside the primary model — OpenRouter
+tries them in order and automatically moves to the next on any error,
+**including a rate limit**, entirely server-side with no extra round trip.
+
+```yaml
+models:
+  curator: openrouter/openai/gpt-5.6-luna
+  curator_fallbacks:
+    - openrouter/meta-llama/llama-4-maverick
+    - openrouter/minimax/minimax-m2.5
+```
+
+OpenRouter-only — has no effect unless the model above it uses the
+`openrouter/` prefix. Also settable via the Action's `lens-model-fallbacks`/
+`curator-model-fallbacks` inputs or the CLI's `--lens-model-fallbacks`/
+`--curator-model-fallbacks` flags (each a comma-separated list), the same way
+`lens-model`/`curator-model` already work.
+
+Both fields ship with a non-empty default (see `.argus/config.yml.example`)
+so switching `lens`/`curator` to an `openrouter/` model gets fallback
+protection out of the box, with no extra config needed. Set either to `[]`
+to disable it for that role.
 
 ### Project standards context
 
