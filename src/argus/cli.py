@@ -90,8 +90,34 @@ def init():
     default=None,
     help="Overrides models.curator from .argus/config.yml — any model litellm supports.",
 )
+@click.option(
+    "--lens-model-fallbacks",
+    default=None,
+    help=(
+        "Comma-separated fallback models OpenRouter tries in order if --lens-model errors "
+        "(rate-limited, down, ...). OpenRouter-only; overrides models.lens_fallbacks."
+    ),
+)
+@click.option(
+    "--curator-model-fallbacks",
+    default=None,
+    help=(
+        "Comma-separated fallback models OpenRouter tries in order if --curator-model errors "
+        "(rate-limited, down, ...). OpenRouter-only; overrides models.curator_fallbacks."
+    ),
+)
 def review(
-    config_path, github, repo, pr_number, base, head, mode_override, lens_model, curator_model
+    config_path,
+    github,
+    repo,
+    pr_number,
+    base,
+    head,
+    mode_override,
+    lens_model,
+    curator_model,
+    lens_model_fallbacks,
+    curator_model_fallbacks,
 ):
     """Runs the panel against a local diff or a GitHub PR."""
     config = load_config(config_path)
@@ -101,6 +127,14 @@ def review(
         config.models.lens = lens_model
     if curator_model:
         config.models.curator = curator_model
+    if lens_model_fallbacks:
+        config.models.lens_fallbacks = [
+            m.strip() for m in lens_model_fallbacks.split(",") if m.strip()
+        ]
+    if curator_model_fallbacks:
+        config.models.curator_fallbacks = [
+            m.strip() for m in curator_model_fallbacks.split(",") if m.strip()
+        ]
 
     if github:
         if repo is None or pr_number is None:
@@ -133,7 +167,14 @@ def review(
 
     if config.is_active and github:
         post_to_github(
-            repo, pr_number, token, findings, config.posting, context, config.models.curator
+            repo,
+            pr_number,
+            token,
+            findings,
+            config.posting,
+            context,
+            config.models.curator,
+            config.models.curator_fallbacks,
         )
         click.echo(f"Posted review to {repo}#{pr_number}.")
     elif config.is_active and not github:

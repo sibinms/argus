@@ -5,6 +5,7 @@ poster the config selects."""
 from __future__ import annotations
 
 import logging
+from collections.abc import Sequence
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
 
@@ -18,9 +19,11 @@ from argus.models.client import generate_pr_summary, run_lens
 logger = logging.getLogger(__name__)
 
 
-def _run_lens_isolated(lens: Lens, context: Context, model: str) -> list[Finding] | None:
+def _run_lens_isolated(
+    lens: Lens, context: Context, model: str, fallbacks: Sequence[str] = ()
+) -> list[Finding] | None:
     try:
-        return run_lens(lens, context, model)
+        return run_lens(lens, context, model, fallbacks)
     except Exception:
         # One lens's provider call failing (bad request, timeout, rate limit,
         # anything) shouldn't cost the other seven their findings — that
@@ -40,12 +43,14 @@ def run_review(context: Context, config: Config) -> list[Finding]:
     # every lens what the PR is trying to do and what invariants to verify —
     # exactly the shared context that prevents cross-file bugs from being missed.
     if not context.pr_summary:
-        summary = generate_pr_summary(context, config.models.lens)
+        summary = generate_pr_summary(context, config.models.lens, config.models.lens_fallbacks)
         context = replace(context, pr_summary=summary)
 
     with ThreadPoolExecutor(max_workers=max(len(lenses), 1)) as executor:
         futures = [
-            executor.submit(_run_lens_isolated, lens, context, config.models.lens)
+            executor.submit(
+                _run_lens_isolated, lens, context, config.models.lens, config.models.lens_fallbacks
+            )
             for lens in lenses
         ]
         results = [future.result() for future in futures]
@@ -65,4 +70,4 @@ def run_review(context: Context, config: Config) -> list[Finding]:
         )
 
     all_findings = [finding for result in results if result is not None for finding in result]
-    return curate(all_findings, context, config.models.curator)
+    return curate(all_findings, context, config.models.curator, config.models.curator_fallbacks)

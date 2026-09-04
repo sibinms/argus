@@ -20,6 +20,9 @@ from __future__ import annotations
 
 import json
 import logging
+from collections.abc import Sequence
+from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import TimeoutError as FutureTimeoutError
 
 from litellm import completion, get_model_info, token_counter
 
@@ -33,6 +36,19 @@ logger = logging.getLogger(__name__)
 # (e.g. most non-OpenAI providers), so leave headroom rather than trimming
 # right up to the reported limit.
 _INPUT_TOKEN_SAFETY_MARGIN = 0.9
+
+# A hard wall-clock ceiling on top of completion()'s own timeout= kwarg, not
+# a replacement for it. Larger than that 120s so a normal slow-but-working
+# call clears it first -- this is only meant to catch the case where
+# litellm's timeout doesn't fire at all: see #79, where a model string
+# litellm has no pricing/context-window metadata for (a custom or very new
+# provider model) combined with an unusually large prompt to hang a review
+# for 20+ minutes with no error and no progress, until someone gave up and
+# cancelled the run by hand. ThreadPoolExecutor.result(timeout=...) can't
+# kill the underlying call if it's still stuck past this ceiling -- the
+# request keeps running in its own thread -- but it stops that one call from
+# blocking the rest of the review indefinitely, which is the actual goal.
+_WALL_CLOCK_TIMEOUT = 180
 
 
 def _max_input_tokens(model: str) -> int | None:
@@ -143,7 +159,7 @@ your job is to point their attention at what matters most.\
 """
 
 
-def generate_pr_summary(context: Context, model: str) -> str:
+def generate_pr_summary(context: Context, model: str, fallbacks: Sequence[str] = ()) -> str:
     """Runs the planner once before lenses fire. Returns a brief that is
     injected into every lens's context so each reviewer knows what the PR
     is trying to do and what invariants to verify."""
@@ -152,7 +168,10 @@ def generate_pr_summary(context: Context, model: str) -> str:
         parts.append(f"# PR title\n{context.pr_title}")
     if context.pr_body:
         parts.append(f"# PR description\n{context.pr_body}")
-    diff_part = f"# Diff\n```diff\n{context.diff}\n```"
+    if context.tech_stack:
+        parts.append(f"# Tech stack\n{context.tech_stack}")
+    diff_note = " (truncated — this PR's diff was too large to include in full)"
+    diff_part = f"# Diff{diff_note if context.diff_truncated else ''}\n```diff\n{context.diff}\n```"
 
     # Unlike _context_prompt, there's no list of files to progressively trim
     # here -- just a binary call on whether standards fit at all. Standards
@@ -182,7 +201,7 @@ def generate_pr_summary(context: Context, model: str) -> str:
     parts.append(diff_part)
     user_prompt = "\n\n".join(parts)
     try:
-        return _complete(PLANNER_SYSTEM_PROMPT, user_prompt, model)
+        return _complete(PLANNER_SYSTEM_PROMPT, user_prompt, model, fallbacks)
     except Exception:
         # Lenses run fine without a brief, just with less shared context, so
         # this shouldn't fail the whole review — but log it so a planner
@@ -203,9 +222,17 @@ def _context_prompt(context: Context, model: str, system_prompt: str) -> str:
         fixed_parts.append(f"# PR title\n{context.pr_title}")
     if context.pr_body:
         fixed_parts.append(f"# PR description\n{context.pr_body}")
+    if context.tech_stack:
+        # A one-line "87% Python, 9% TypeScript" fact, not a droppable
+        # nice-to-have doc — keep it with the other fixed parts rather than
+        # in the standards/file budget below.
+        fixed_parts.append(f"# Tech stack\n{context.tech_stack}")
     if context.pr_summary:
         fixed_parts.append(f"# Review brief\n{context.pr_summary}")
-    fixed_parts.append(f"# Diff\n```diff\n{context.diff}\n```")
+    diff_note = " (truncated — this PR's diff was too large to include in full)"
+    fixed_parts.append(
+        f"# Diff{diff_note if context.diff_truncated else ''}\n```diff\n{context.diff}\n```"
+    )
 
     # More broadly useful than any one changed file's full content, but
     # still dropped before ever touching fixed_parts -- a repo's standards
@@ -261,7 +288,37 @@ def _context_prompt(context: Context, model: str, system_prompt: str) -> str:
     return "\n\n".join(fixed_parts + standards_parts + file_parts)
 
 
-def _complete(system_prompt: str, user_prompt: str, model: str) -> str:
+def _openrouter_models_field(model: str, fallbacks: Sequence[str]) -> list[str] | None:
+    """Builds OpenRouter's own "models" fallback array: the primary model
+    first, then each configured fallback, in priority order. OpenRouter
+    tries the first, and automatically moves to the next on any error —
+    rate-limiting explicitly included — without a round trip back to us.
+    litellm's own retry/timeout handling in _complete has no visibility
+    into *why* a provider call failed, so it can't make this kind of
+    "try a different, healthier route" decision on its own; OpenRouter can,
+    since it's the one actually holding multiple backends for the same
+    model. See the team's own #argus-alerts incident: a model backed by
+    only a few backend routes (as opposed to e.g. an open-weight model with
+    a dozen-plus independent hosting providers) collapsed under shared-pool
+    rate limiting when several of those routes went unhealthy at once.
+
+    Model strings here use litellm's own "openrouter/" routing prefix
+    (e.g. "openrouter/anthropic/claude-3.5-haiku"), stripped before going
+    into the array — OpenRouter's own model slugs never carry it.
+
+    Returns None (send nothing) when there's no fallback to configure, or
+    when the primary model isn't routed through OpenRouter at all — this
+    is an OpenRouter-specific feature with no equivalent for other
+    providers, and sending an unrecognized "models" field to a provider
+    that doesn't understand it isn't guaranteed to be a harmless no-op."""
+    if not fallbacks or not model.startswith("openrouter/"):
+        return None
+    return [model.removeprefix("openrouter/")] + [f.removeprefix("openrouter/") for f in fallbacks]
+
+
+def _complete(
+    system_prompt: str, user_prompt: str, model: str, fallbacks: Sequence[str] = ()
+) -> str:
     kwargs: dict = {}
     if model.startswith("openrouter/"):
         # Argus sends PR diffs and file content off-repo on every call; for
@@ -271,17 +328,38 @@ def _complete(system_prompt: str, user_prompt: str, model: str) -> str:
         # and no training-data collection. Not configurable — this should
         # never depend on someone remembering to opt in.
         kwargs["extra_body"] = {"provider": {"zdr": True, "data_collection": "deny"}}
+        models_field = _openrouter_models_field(model, fallbacks)
+        if models_field is not None:
+            kwargs["extra_body"]["models"] = models_field
 
-    response = completion(
-        model=model,
-        messages=[
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_prompt},
-        ],
-        timeout=120,  # never let a stalled provider hang the whole review
-        **kwargs,
-    )
-    return response.choices[0].message.content or ""
+    def _call() -> str:
+        response = completion(
+            model=model,
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt},
+            ],
+            timeout=120,  # never let a stalled provider hang the whole review
+            **kwargs,
+        )
+        return response.choices[0].message.content or ""
+
+    # See _WALL_CLOCK_TIMEOUT's own comment for why this wraps completion()'s
+    # timeout= rather than trusting it alone. Deliberately not a `with`
+    # block: ThreadPoolExecutor's __exit__ calls shutdown(wait=True), which
+    # would block returning/raising here until the stuck call finishes --
+    # exactly what this wrapper exists to avoid. shutdown(wait=False) below
+    # abandons that thread to finish or die on its own instead.
+    pool = ThreadPoolExecutor(max_workers=1)
+    future = pool.submit(_call)
+    try:
+        return future.result(timeout=_WALL_CLOCK_TIMEOUT)
+    except FutureTimeoutError:
+        raise TimeoutError(
+            f"call to {model} exceeded the {_WALL_CLOCK_TIMEOUT}s wall-clock ceiling"
+        ) from None
+    finally:
+        pool.shutdown(wait=False)
 
 
 def _coerce_line(value: object) -> int | None:
@@ -300,9 +378,13 @@ def _coerce_line(value: object) -> int | None:
     return None
 
 
-def run_lens(lens: Lens, context: Context, model: str) -> list[Finding]:
+def run_lens(
+    lens: Lens, context: Context, model: str, fallbacks: Sequence[str] = ()
+) -> list[Finding]:
     system_prompt = lens.system_prompt()
-    text = _complete(system_prompt, _context_prompt(context, model, system_prompt), model)
+    text = _complete(
+        system_prompt, _context_prompt(context, model, system_prompt), model, fallbacks
+    )
 
     try:
         raw_findings = _extract_json(text)
@@ -418,7 +500,9 @@ order, with keys: action (keep|drop_noise|drop|downgrade), confidence \
 sentence), and evidence_quote (a real quote justifying a "drop", or null)."""
 
 
-def curate_with_model(findings: list[Finding], context: Context, model: str) -> list[dict]:
+def curate_with_model(
+    findings: list[Finding], context: Context, model: str, fallbacks: Sequence[str] = ()
+) -> list[dict]:
     if not findings:
         return []
 
@@ -443,7 +527,7 @@ def curate_with_model(findings: list[Finding], context: Context, model: str) -> 
         + "\n```"
     )
 
-    text = _complete(CURATOR_SYSTEM_PROMPT, user_prompt, model)
+    text = _complete(CURATOR_SYSTEM_PROMPT, user_prompt, model, fallbacks)
 
     try:
         decisions = _extract_json(text)

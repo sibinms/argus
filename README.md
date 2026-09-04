@@ -108,7 +108,7 @@ the workflow, as shown below.
 **Anthropic**
 
 ``` yaml
-- uses: sibinms/argus@v1.2.34
+- uses: sibinms/argus@v1.2.36
   with:
     anthropic-api-key: ${{ secrets.ANTHROPIC_API_KEY }}
 ```
@@ -116,7 +116,7 @@ the workflow, as shown below.
 **OpenAI**
 
 ``` yaml
-- uses: sibinms/argus@v1.2.34
+- uses: sibinms/argus@v1.2.36
   env:
     OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
   with:
@@ -127,7 +127,7 @@ the workflow, as shown below.
 **Gemini**
 
 ``` yaml
-- uses: sibinms/argus@v1.2.34
+- uses: sibinms/argus@v1.2.36
   env:
     GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
   with:
@@ -138,7 +138,7 @@ the workflow, as shown below.
 **OpenRouter** — one key, hundreds of models across providers.
 
 ``` yaml
-- uses: sibinms/argus@v1.2.34
+- uses: sibinms/argus@v1.2.36
   env:
     OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
   with:
@@ -162,7 +162,7 @@ both are present, so a workflow-level pick always wins for a quick test.
 ### CLI
 
 ``` bash
-pip install "git+https://github.com/sibinms/argus.git@v1.2.34"
+pip install "git+https://github.com/sibinms/argus.git@v1.2.36"
 argus init
 
 export ANTHROPIC_API_KEY=...   # or OPENAI_API_KEY, GEMINI_API_KEY, ...
@@ -197,7 +197,7 @@ steps:
     args:
       - -c
       - |
-        pip install "git+https://github.com/sibinms/argus.git@v1.2.34"
+        pip install "git+https://github.com/sibinms/argus.git@v1.2.36"
         argus review \
           --github \
           --repo $$REPO_FULL_NAME \
@@ -263,10 +263,11 @@ Use parameterized queries instead.
 
 Configure:
 
--   Models
+-   Models (and, for OpenRouter, fallback models: `lens_fallbacks`/`curator_fallbacks`)
 -   Lenses
 -   Context limits
 -   Project standards files fed to every reviewer (`project_standards_files`)
+-   Tech stack context pulled from GitHub (`tech_stack`)
 -   Confidence thresholds
 -   Review mode (shadow / active)
 -   Whether a clean PR gets a real **Approved** review (`approve_reviews`)
@@ -278,6 +279,37 @@ all — the Action's `lens-model`/`curator-model` inputs and the CLI's
 `--lens-model`/`--curator-model` flags override whatever `.argus/config.yml`
 says (or the defaults, if there's no file). Useful for a quick test of a
 different model; commit the config file once you've settled on one.
+
+### OpenRouter fallback models
+
+On OpenRouter, a model backed by only a handful of independent backend
+providers (a single vendor's own closed model, typically) is more exposed to
+shared-pool rate limiting than one backed by a dozen-plus — if a couple of
+those few backends go unhealthy at once, everyone routing through that model
+funnels onto whatever's left. `models.lens_fallbacks`/`models.curator_fallbacks`
+(each a list of `openrouter/`-prefixed model strings) get sent to OpenRouter
+as its own `models` fallback array alongside the primary model — OpenRouter
+tries them in order and automatically moves to the next on any error,
+**including a rate limit**, entirely server-side with no extra round trip.
+
+```yaml
+models:
+  curator: openrouter/openai/gpt-5.6-luna
+  curator_fallbacks:
+    - openrouter/meta-llama/llama-4-maverick
+    - openrouter/minimax/minimax-m2.5
+```
+
+OpenRouter-only — has no effect unless the model above it uses the
+`openrouter/` prefix. Also settable via the Action's `lens-model-fallbacks`/
+`curator-model-fallbacks` inputs or the CLI's `--lens-model-fallbacks`/
+`--curator-model-fallbacks` flags (each a comma-separated list), the same way
+`lens-model`/`curator-model` already work.
+
+Both fields ship with a non-empty default (see `.argus/config.yml.example`)
+so switching `lens`/`curator` to an `openrouter/` model gets fallback
+protection out of the box, with no extra config needed. Set either to `[]`
+to disable it for that role.
 
 ### Project standards context
 
@@ -292,6 +324,50 @@ It's read from the PR's **base branch**, never the PR's head — a PR can't
 rewrite its own review rules within the same diff being reviewed. Configure
 which files to read via `context.project_standards_files` (default
 `[CLAUDE.md, AGENTS.md]`); set it to `[]` to disable.
+
+### Tech stack context
+
+Running via the Action, Argus fetches the repo's language breakdown from
+GitHub (`GET /repos/{owner}/{repo}/languages`) and feeds it to every lens, the
+curator, and the planner as a one-line fact — e.g. `87% Python, 9%
+TypeScript`. It's cheap signal, not a framework guess: bytes-per-language,
+not "this is Django" — but it steers a lens's generic advice toward what the
+stack actually makes a real footgun, instead of treating every diff the same
+regardless of language.
+
+GitHub-only: running locally against a git checkout (`gather_local`) has no
+API to ask, so this is always empty there. Set `context.tech_stack: false` to
+disable it.
+
+### Very large PRs
+
+The diff itself has a hard ceiling, `context.max_diff_bytes` (default
+`200000`), independent of `max_files`/`max_bytes_per_file` above — those only
+bound the optional full-file dumps a lens can additionally see, not the diff
+that's always included. A PR whose diff exceeds it is cut at a whole-file
+boundary, never mid-hunk, and every prompt's `# Diff` section is marked
+`(truncated — this PR's diff was too large to include in full)` so a lens
+doesn't mistake a partial diff for the complete picture.
+
+This matters most on a PR whose head is a merge commit (skips the
+incremental-diff optimization and falls back to reviewing the full base
+diff — see the "head is a merge commit" warning in the logs) or a genuinely
+huge PR (hundreds of changed files): without this cap, the prompt sent to
+the model has no upper bound at all when the configured `lens-model`/
+`curator-model` isn't one litellm has pricing/context-window metadata for
+(a brand-new or custom model string) — the per-model token-budget check
+silently no-ops in that case, since it has nothing to trim against, and a
+large enough diff can then produce a multi-minute-plus model call that
+hangs the whole review. `max_diff_bytes` bounds the prompt regardless of
+whether the model is one litellm recognizes.
+
+As defense in depth on top of that: every model call also has a 180-second
+wall-clock ceiling independent of `completion()`'s own `timeout=` kwarg,
+which isn't reliably honored for every provider/model combination. A call
+stuck past it fails with a clear `TimeoutError` (a lens gets skipped and
+logged, the same as any other lens failure; a stuck curator call fails the
+whole run loudly, since there's no partial-curation fallback) instead of
+hanging indefinitely with no error and no progress.
 
 ### Approving pull requests
 

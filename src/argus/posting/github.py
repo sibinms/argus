@@ -393,6 +393,7 @@ def post_to_github(
     posting: PostingConfig,
     context: Context,
     curator_model: str,
+    curator_fallbacks: list[str] | None = None,
 ) -> None:
     gh = Github(token, timeout=30)
     repo = gh.get_repo(repo_full_name)
@@ -421,7 +422,9 @@ def post_to_github(
         reconstructed = _reconstruct_finding(posted_inline[fp])
         if reconstructed is not None:
             stale_targets.append(reconstructed)
-    combined = recurate_with_replies(findings + stale_targets, replies, context, curator_model)
+    combined = recurate_with_replies(
+        findings + stale_targets, replies, context, curator_model, curator_fallbacks
+    )
     # Sliced back out by position rather than relied on as the same objects
     # in place — recurate_with_replies mutates its Finding objects today,
     # but this way the split is correct even if that ever changes to

@@ -8,8 +8,10 @@ from github.GithubException import GithubException
 from argus.config import ContextConfig
 from argus.context.gather import (
     _MAX_PROJECT_STANDARDS_ATTEMPTS,
+    _format_languages,
     _is_relative_import,
     _resolve_project_standards,
+    _split_diff_by_file,
     gather_github,
     gather_local,
 )
@@ -17,6 +19,121 @@ from argus.context.gather import (
 
 def _git(tmp_path, *args):
     subprocess.run(["git", *args], cwd=tmp_path, check=True, capture_output=True)
+
+
+def test_format_languages_ranks_and_rounds_by_share():
+    result = _format_languages({"Python": 850_000, "TypeScript": 90_000, "HTML": 60_000})
+    assert result == "85% Python, 9% TypeScript, 6% HTML"
+
+
+def test_format_languages_drops_shares_under_the_threshold():
+    # A stray 3-byte Dockerfile shouldn't show up next to the real stack.
+    result = _format_languages({"Python": 999_997, "Dockerfile": 3})
+    assert result == "100% Python"
+
+
+def test_format_languages_caps_the_list_for_a_polyglot_repo():
+    languages = {f"Lang{i}": 100 - i for i in range(10)}
+    result = _format_languages(languages)
+    assert len(result.split(", ")) == 6
+
+
+def test_format_languages_ignores_pygithubs_injected_url_key():
+    # Regression test (#75): PyGithub's get_languages() is typed
+    # dict[str, int], but in practice also returns a "url" entry (the
+    # request URL, as a str) alongside the real language keys -- summing
+    # that in with sum(languages.values()) crashed with
+    # "TypeError: unsupported operand type(s) for +: 'int' and 'str'" on
+    # this function's very first live run, caught by Argus's own
+    # self-review of this PR.
+    result = _format_languages(
+        {"Python": 234_737, "url": "https://api.github.com/repos/o/r/languages"}
+    )
+    assert result == "100% Python"
+
+
+def test_format_languages_empty_dict_is_empty_string():
+    assert _format_languages({}) == ""
+
+
+def test_gather_github_includes_tech_stack_from_repo_languages(monkeypatch):
+    pr = MagicMock()
+    pr.title = "t"
+    pr.body = "b"
+    pr.head.sha = "s"
+    pr.get_files.return_value = []
+
+    repo = MagicMock()
+    repo.get_pull.return_value = pr
+    # Includes PyGithub's real-world "url" entry (see
+    # test_format_languages_ignores_pygithubs_injected_url_key) so this
+    # exercises gather_github's actual production shape, not an idealized one.
+    repo.get_languages.return_value = {
+        "Python": 900,
+        "TypeScript": 100,
+        "url": "https://api.github.com/repos/o/r/languages",
+    }
+
+    gh = MagicMock()
+    gh.get_repo.return_value = repo
+    monkeypatch.setattr(github, "Github", lambda *a, **k: gh)
+
+    ctx = gather_github("o/r", 1, "tok", ContextConfig())
+
+    assert ctx.tech_stack == "90% Python, 10% TypeScript"
+
+
+def test_gather_github_tech_stack_survives_a_languages_api_failure(monkeypatch):
+    """Language detection is optional context, same as project standards --
+    a GithubException or network error fetching it must degrade to "" rather
+    than fail the whole review."""
+    pr = MagicMock()
+    pr.title = "t"
+    pr.body = "b"
+    pr.head.sha = "s"
+    pr.get_files.return_value = []
+
+    repo = MagicMock()
+    repo.get_pull.return_value = pr
+    repo.get_languages.side_effect = GithubException(503, data={}, headers=None)
+
+    gh = MagicMock()
+    gh.get_repo.return_value = repo
+    monkeypatch.setattr(github, "Github", lambda *a, **k: gh)
+
+    ctx = gather_github("o/r", 1, "tok", ContextConfig())
+
+    assert ctx.tech_stack == ""
+
+
+def test_gather_github_tech_stack_disabled_skips_the_api_call(monkeypatch):
+    pr = MagicMock()
+    pr.title = "t"
+    pr.body = "b"
+    pr.head.sha = "s"
+    pr.get_files.return_value = []
+
+    repo = MagicMock()
+    repo.get_pull.return_value = pr
+
+    gh = MagicMock()
+    gh.get_repo.return_value = repo
+    monkeypatch.setattr(github, "Github", lambda *a, **k: gh)
+
+    ctx = gather_github("o/r", 1, "tok", ContextConfig(tech_stack=False))
+
+    assert ctx.tech_stack == ""
+    repo.get_languages.assert_not_called()
+
+
+def test_gather_local_never_sets_tech_stack(monkeypatch):
+    # gather_local has no GitHub API to ask -- always "" regardless of config.
+    monkeypatch.setattr(
+        "subprocess.run",
+        lambda *a, **k: MagicMock(stdout=""),
+    )
+    ctx = gather_local("base", "head", ContextConfig())
+    assert ctx.tech_stack == ""
 
 
 def test_gather_github_handles_get_contents_failure(monkeypatch):
@@ -226,6 +343,37 @@ def test_gather_github_excludes_ignored_files_from_the_diff_itself(monkeypatch):
 
     assert "real change" in ctx.diff
     assert "lockfile noise" not in ctx.diff
+
+
+def test_gather_github_truncates_an_oversized_diff(monkeypatch):
+    # Regression test (#79): a huge PR (many files, or a merge commit that
+    # skips the incremental diff and falls back to the full base diff) used
+    # to be sent to every lens completely uncapped when the configured
+    # model has no litellm pricing/context-window entry to trim against.
+    first = MagicMock()
+    first.filename = "a.py"
+    first.patch = "x" * 200
+    second = MagicMock()
+    second.filename = "b.py"
+    second.patch = "y" * 200
+
+    pr = MagicMock()
+    pr.title = "t"
+    pr.body = "b"
+    pr.head.sha = "s"
+    pr.get_files.return_value = [first, second]
+    repo = MagicMock()
+    repo.get_pull.return_value = pr
+    repo.get_contents.side_effect = GithubException(404, data={}, headers=None)
+    gh = MagicMock()
+    gh.get_repo.return_value = repo
+    monkeypatch.setattr(github, "Github", lambda *a, **k: gh)
+
+    ctx = gather_github("o/r", 1, "tok", ContextConfig(max_diff_bytes=150))
+
+    assert ctx.diff_truncated is True
+    assert "x" * 200 in ctx.diff
+    assert "y" * 200 not in ctx.diff
 
 
 def test_gather_github_does_not_fetch_content_for_ignored_files(monkeypatch):
@@ -554,6 +702,61 @@ def test_gather_local_sets_changed_paths(tmp_path, monkeypatch):
     ctx = gather_local("base", "HEAD", ContextConfig())
 
     assert ctx.changed_paths == ["app.py"]
+
+
+def test_split_diff_by_file_reconstructs_original_when_rejoined():
+    diff = "diff --git a/x b/x\n+1\ndiff --git a/y b/y\n+2\n"
+    parts = _split_diff_by_file(diff)
+    assert parts == ["diff --git a/x b/x\n+1", "diff --git a/y b/y\n+2\n"]
+    assert "\n".join(parts) == diff
+
+
+def test_split_diff_by_file_empty_string():
+    assert _split_diff_by_file("") == []
+
+
+def test_gather_local_truncates_an_oversized_diff(tmp_path, monkeypatch):
+    # Regression test (#79): a huge diff with no per-model budget available
+    # (an unmapped model, or none configured yet at gather time) used to be
+    # sent completely uncapped -- see truncate_diff_parts's docstring.
+    _git(tmp_path, "init", "-q")
+    _git(tmp_path, "config", "user.email", "t@example.com")
+    _git(tmp_path, "config", "user.name", "t")
+    (tmp_path / "a.py").write_text("old\n")
+    (tmp_path / "b.py").write_text("old\n")
+    _git(tmp_path, "add", "a.py", "b.py")
+    _git(tmp_path, "commit", "-qm", "init")
+    _git(tmp_path, "branch", "base")
+    (tmp_path / "a.py").write_text("x" * 200 + "\n")
+    (tmp_path / "b.py").write_text("y" * 200 + "\n")
+    _git(tmp_path, "add", "a.py", "b.py")
+    _git(tmp_path, "commit", "-qm", "change")
+
+    monkeypatch.chdir(tmp_path)
+    ctx = gather_local("base", "HEAD", ContextConfig(max_diff_bytes=150))
+
+    assert ctx.diff_truncated is True
+    assert "x" * 200 in ctx.diff
+    assert "y" * 200 not in ctx.diff
+
+
+def test_gather_local_diff_under_the_cap_is_not_truncated(tmp_path, monkeypatch):
+    _git(tmp_path, "init", "-q")
+    _git(tmp_path, "config", "user.email", "t@example.com")
+    _git(tmp_path, "config", "user.name", "t")
+    (tmp_path / "a.py").write_text("old\n")
+    _git(tmp_path, "add", "a.py")
+    _git(tmp_path, "commit", "-qm", "init")
+    _git(tmp_path, "branch", "base")
+    (tmp_path / "a.py").write_text("new\n")
+    _git(tmp_path, "add", "a.py")
+    _git(tmp_path, "commit", "-qm", "change")
+
+    monkeypatch.chdir(tmp_path)
+    ctx = gather_local("base", "HEAD", ContextConfig())
+
+    assert ctx.diff_truncated is False
+    assert "new" in ctx.diff
 
 
 def test_gather_local_excludes_ignored_files_from_the_diff_itself(tmp_path, monkeypatch):

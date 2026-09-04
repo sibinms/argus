@@ -10,7 +10,7 @@ def test_run_lens_isolated_returns_none_on_exception(monkeypatch, caplog):
     # None (not []) marks a failure, distinct from a lens that ran fine and
     # genuinely found nothing -- run_review relies on that distinction to
     # tell "some lenses failed" from "every lens failed" (see #52).
-    def failing_run_lens(lens, context, model):
+    def failing_run_lens(lens, context, model, fallbacks=()):
         raise RuntimeError("boom")
 
     monkeypatch.setattr("argus.pipeline.run_lens", failing_run_lens)
@@ -25,7 +25,9 @@ def test_run_lens_isolated_passes_through_on_success(monkeypatch):
     expected = [
         Finding(lens="security", file="a.py", line=1, summary="s", detail="", confidence="low")
     ]
-    monkeypatch.setattr("argus.pipeline.run_lens", lambda lens, context, model: expected)
+    monkeypatch.setattr(
+        "argus.pipeline.run_lens", lambda lens, context, model, fallbacks=(): expected
+    )
     lens = Lens(name="security", instructions="look for problems")
     findings = _run_lens_isolated(lens, Context(diff="+x", changed_files=[]), "m")
     assert findings == expected
@@ -34,7 +36,7 @@ def test_run_lens_isolated_passes_through_on_success(monkeypatch):
 def test_run_review_survives_one_lens_failing(monkeypatch):
     # Simulate PR #2399: one lens's provider call fails (context too large for
     # the model), the rest should still produce findings and reach curation.
-    def fake_run_lens(lens, context, model):
+    def fake_run_lens(lens, context, model, fallbacks=()):
         if lens.name == "contracts":
             raise RuntimeError("input length exceeds model limit")
         return [
@@ -42,8 +44,12 @@ def test_run_review_survives_one_lens_failing(monkeypatch):
         ]
 
     monkeypatch.setattr("argus.pipeline.run_lens", fake_run_lens)
-    monkeypatch.setattr("argus.pipeline.generate_pr_summary", lambda context, model: "")
-    monkeypatch.setattr("argus.pipeline.curate", lambda findings, context, model: findings)
+    monkeypatch.setattr(
+        "argus.pipeline.generate_pr_summary", lambda context, model, fallbacks=(): ""
+    )
+    monkeypatch.setattr(
+        "argus.pipeline.curate", lambda findings, context, model, fallbacks=(): findings
+    )
 
     config = Config(lenses=["contracts", "security"], models=ModelConfig())
     context = Context(diff="+x", changed_files=[])
@@ -61,14 +67,16 @@ def test_run_review_raises_when_all_lenses_fail(monkeypatch):
     # would let Argus post a clean "looks good" verdict on a PR that received
     # zero actual review. run_review must fail loudly instead of curating an
     # empty list.
-    def always_fails(lens, context, model):
+    def always_fails(lens, context, model, fallbacks=()):
         raise RuntimeError("quota exhausted")
 
     monkeypatch.setattr("argus.pipeline.run_lens", always_fails)
-    monkeypatch.setattr("argus.pipeline.generate_pr_summary", lambda context, model: "")
+    monkeypatch.setattr(
+        "argus.pipeline.generate_pr_summary", lambda context, model, fallbacks=(): ""
+    )
     curate_called = False
 
-    def fake_curate(findings, context, model):
+    def fake_curate(findings, context, model, fallbacks=()):
         nonlocal curate_called
         curate_called = True
         return findings
