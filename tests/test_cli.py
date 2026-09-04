@@ -92,6 +92,53 @@ def test_lens_and_curator_model_flags_override_config(tmp_path, monkeypatch):
     assert seen_configs[0].models.curator == "gemini/gemini-3.1-pro-preview"
 
 
+def test_model_fallback_flags_parse_comma_separated_lists(tmp_path, monkeypatch):
+    _make_repo_with_diff(tmp_path)
+    monkeypatch.chdir(tmp_path)
+
+    seen_configs = []
+    monkeypatch.setattr(
+        cli, "run_review", lambda context, config: seen_configs.append(config) or []
+    )
+
+    runner = CliRunner()
+    result = runner.invoke(
+        cli.main,
+        [
+            "review",
+            "--base",
+            "base",
+            "--head",
+            "HEAD",
+            "--lens-model-fallbacks",
+            "openrouter/a/b, openrouter/c/d",
+            "--curator-model-fallbacks",
+            "openrouter/e/f",
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert seen_configs[0].models.lens_fallbacks == ["openrouter/a/b", "openrouter/c/d"]
+    assert seen_configs[0].models.curator_fallbacks == ["openrouter/e/f"]
+
+
+def test_model_fallback_flags_absent_leave_config_defaults(tmp_path, monkeypatch):
+    _make_repo_with_diff(tmp_path)
+    monkeypatch.chdir(tmp_path)
+
+    seen_configs = []
+    monkeypatch.setattr(
+        cli, "run_review", lambda context, config: seen_configs.append(config) or []
+    )
+
+    runner = CliRunner()
+    result = runner.invoke(cli.main, ["review", "--base", "base", "--head", "HEAD"])
+
+    assert result.exit_code == 0
+    assert seen_configs[0].models.lens_fallbacks == Config().models.lens_fallbacks
+    assert seen_configs[0].models.curator_fallbacks == Config().models.curator_fallbacks
+
+
 def test_model_flags_override_an_existing_config_file(tmp_path, monkeypatch):
     """The flags must win over a *committed* config, not just over the
     built-in defaults — otherwise a repo with its own .argus/config.yml

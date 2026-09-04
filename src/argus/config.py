@@ -27,12 +27,38 @@ BUILTIN_LENSES = [
 class ModelConfig:
     lens: str = "claude-haiku-4-5"
     curator: str = "claude-opus-4-8"
+    # OpenRouter-only: additional models OpenRouter will automatically try,
+    # in order, if the primary model errors -- including a rate limit, which
+    # is exactly what this exists for (see the team's own #argus-alerts
+    # incident that prompted this feature). Has no effect unless the
+    # matching lens/curator model string starts with "openrouter/" -- see
+    # _openrouter_models_field's docstring in models/client.py -- so these
+    # defaults are a harmless no-op for the vast majority of setups (the
+    # lens/curator defaults just above are plain Anthropic models, not
+    # OpenRouter at all) and only take effect once a repo opts into
+    # OpenRouter for one of those two roles. Each is a model backed by many
+    # independent inference providers (the property that actually helps
+    # here -- see the README's "OpenRouter fallback models" section), not
+    # necessarily the cheapest option available. Override per-repo via
+    # .argus/config.yml if a different fallback chain fits better.
+    lens_fallbacks: list[str] = field(default_factory=lambda: ["openrouter/z-ai/glm-4.7-flash"])
+    curator_fallbacks: list[str] = field(
+        default_factory=lambda: [
+            "openrouter/meta-llama/llama-4-maverick",
+            "openrouter/minimax/minimax-m2.5",
+        ]
+    )
 
 
 @dataclass
 class ContextConfig:
     max_files: int = 15
     max_bytes_per_file: int = 20_000
+    # Hard ceiling on the diff itself, in bytes, independent of whether the
+    # configured model is one litellm has pricing/context-window metadata
+    # for -- see truncate_diff_parts's docstring in context/budget.py for
+    # why this can't be left to the per-model token-budget check alone.
+    max_diff_bytes: int = 200_000
     include_neighbors: bool = False
     ignore_globs: list[str] = field(
         default_factory=lambda: [
@@ -109,10 +135,16 @@ def load_config(path: Path | None = None) -> Config:
 
     if "lenses" in raw:
         _require_type(raw["lenses"], list, "lenses")
+    if "lens_fallbacks" in models_raw and models_raw["lens_fallbacks"] is not None:
+        _require_type(models_raw["lens_fallbacks"], list, "models.lens_fallbacks")
+    if "curator_fallbacks" in models_raw and models_raw["curator_fallbacks"] is not None:
+        _require_type(models_raw["curator_fallbacks"], list, "models.curator_fallbacks")
     if "max_files" in context_raw:
         _require_type(context_raw["max_files"], int, "context.max_files")
     if "max_bytes_per_file" in context_raw:
         _require_type(context_raw["max_bytes_per_file"], int, "context.max_bytes_per_file")
+    if "max_diff_bytes" in context_raw:
+        _require_type(context_raw["max_diff_bytes"], int, "context.max_diff_bytes")
     if "ignore_globs" in context_raw and context_raw["ignore_globs"] is not None:
         _require_type(context_raw["ignore_globs"], list, "context.ignore_globs")
     if "tech_stack" in context_raw:
@@ -132,6 +164,23 @@ def load_config(path: Path | None = None) -> Config:
         models=ModelConfig(
             lens=models_raw.get("lens", ModelConfig.lens),
             curator=models_raw.get("curator", ModelConfig.curator),
+            # Absent or explicit null both mean "unset" and fall back to
+            # ModelConfig's own (non-empty) defaults; only a present,
+            # non-null value -- including [] to explicitly disable
+            # fallbacks -- is treated as an explicit override. Plain `or`
+            # would wrongly collapse "key absent" to [], discarding the
+            # class default entirely -- same trap project_standards_files
+            # below already guards against.
+            lens_fallbacks=(
+                models_raw["lens_fallbacks"]
+                if models_raw.get("lens_fallbacks") is not None
+                else ModelConfig().lens_fallbacks
+            ),
+            curator_fallbacks=(
+                models_raw["curator_fallbacks"]
+                if models_raw.get("curator_fallbacks") is not None
+                else ModelConfig().curator_fallbacks
+            ),
         ),
         lenses=raw.get("lenses", list(BUILTIN_LENSES)),
         context=ContextConfig(
@@ -139,6 +188,7 @@ def load_config(path: Path | None = None) -> Config:
             max_bytes_per_file=context_raw.get(
                 "max_bytes_per_file", ContextConfig.max_bytes_per_file
             ),
+            max_diff_bytes=context_raw.get("max_diff_bytes", ContextConfig.max_diff_bytes),
             include_neighbors=context_raw.get("include_neighbors", ContextConfig.include_neighbors),
             tech_stack=context_raw.get("tech_stack", ContextConfig.tech_stack),
             ignore_globs=context_raw.get("ignore_globs") or ContextConfig().ignore_globs,

@@ -1,4 +1,5 @@
 import json
+import time
 from unittest.mock import MagicMock
 
 import pytest
@@ -13,6 +14,7 @@ from argus.models.client import (
     _context_prompt,
     _extract_json,
     _max_input_tokens,
+    _openrouter_models_field,
     curate_with_model,
     generate_pr_summary,
     run_lens,
@@ -56,6 +58,30 @@ def test_curator_keeps_everything_when_output_is_unparseable(monkeypatch):
     assert decisions[0]["action"] == "keep"
 
 
+def test_curate_with_model_threads_fallbacks_to_the_model_call(monkeypatch):
+    captured = {}
+
+    def fake_completion(**kwargs):
+        captured.update(kwargs)
+        return _fake_completion("[]")(**kwargs)
+
+    monkeypatch.setattr("argus.models.client.completion", fake_completion)
+    findings = [
+        Finding(lens="x", file="a.py", line=1, summary="s", detail="d", confidence="medium")
+    ]
+    curate_with_model(
+        findings,
+        Context(diff="+x", changed_files=[]),
+        "openrouter/openai/gpt-5.6-luna",
+        ["openrouter/meta-llama/llama-4-maverick", "openrouter/minimax/minimax-m2.5"],
+    )
+    assert captured["extra_body"]["models"] == [
+        "openai/gpt-5.6-luna",
+        "meta-llama/llama-4-maverick",
+        "minimax/minimax-m2.5",
+    ]
+
+
 def test_complete_sets_a_request_timeout(monkeypatch):
     captured = {}
 
@@ -69,6 +95,29 @@ def test_complete_sets_a_request_timeout(monkeypatch):
     monkeypatch.setattr("argus.models.client.completion", fake_completion)
     _complete("sys", "user", "m")
     assert captured.get("timeout")
+
+
+def test_complete_raises_on_a_stuck_call_past_the_wall_clock_ceiling(monkeypatch):
+    # Regression test (#79): completion()'s own timeout= isn't reliably
+    # enforced for every provider/model combination -- a call stuck past it
+    # must still not hang the caller forever. _WALL_CLOCK_TIMEOUT patched
+    # tiny so this doesn't actually wait real minutes.
+    monkeypatch.setattr("argus.models.client._WALL_CLOCK_TIMEOUT", 0.05)
+
+    def fake_completion(**kwargs):
+        time.sleep(0.3)
+        resp = MagicMock()
+        resp.choices = [MagicMock()]
+        resp.choices[0].message.content = "[]"
+        return resp
+
+    monkeypatch.setattr("argus.models.client.completion", fake_completion)
+
+    start = time.monotonic()
+    with pytest.raises(TimeoutError, match="wall-clock ceiling"):
+        _complete("sys", "user", "m")
+    # Must return close to the patched ceiling, not wait for the stuck call.
+    assert time.monotonic() - start < 0.3
 
 
 def test_complete_defaults_openrouter_to_zero_data_retention(monkeypatch):
@@ -99,6 +148,68 @@ def test_complete_does_not_send_openrouter_params_to_other_providers(monkeypatch
     monkeypatch.setattr("argus.models.client.completion", fake_completion)
     _complete("sys", "user", "claude-haiku-4-5")
     assert "extra_body" not in captured
+
+
+def test_openrouter_models_field_puts_primary_first_then_fallbacks_stripped():
+    result = _openrouter_models_field(
+        "openrouter/openai/gpt-5.6-luna",
+        ["openrouter/meta-llama/llama-4-maverick", "openrouter/minimax/minimax-m2.5"],
+    )
+    assert result == [
+        "openai/gpt-5.6-luna",
+        "meta-llama/llama-4-maverick",
+        "minimax/minimax-m2.5",
+    ]
+
+
+def test_openrouter_models_field_none_with_no_fallbacks():
+    assert _openrouter_models_field("openrouter/openai/gpt-5.6-luna", []) is None
+
+
+def test_openrouter_models_field_none_for_a_non_openrouter_model():
+    # OpenRouter-specific feature -- sending an unrecognized "models" field
+    # to a provider that doesn't understand it isn't a guaranteed no-op.
+    assert _openrouter_models_field("claude-haiku-4-5", ["openrouter/openai/gpt-4o-mini"]) is None
+
+
+def test_complete_sends_openrouter_models_fallback_array(monkeypatch):
+    captured = {}
+
+    def fake_completion(**kwargs):
+        captured.update(kwargs)
+        resp = MagicMock()
+        resp.choices = [MagicMock()]
+        resp.choices[0].message.content = "[]"
+        return resp
+
+    monkeypatch.setattr("argus.models.client.completion", fake_completion)
+    _complete(
+        "sys",
+        "user",
+        "openrouter/openai/gpt-5.6-luna",
+        ["openrouter/meta-llama/llama-4-maverick"],
+    )
+    assert captured["extra_body"]["models"] == [
+        "openai/gpt-5.6-luna",
+        "meta-llama/llama-4-maverick",
+    ]
+    # ZDR/no-training-data must still be set alongside it, not replaced.
+    assert captured["extra_body"]["provider"] == {"zdr": True, "data_collection": "deny"}
+
+
+def test_complete_omits_models_field_with_no_fallbacks_configured(monkeypatch):
+    captured = {}
+
+    def fake_completion(**kwargs):
+        captured.update(kwargs)
+        resp = MagicMock()
+        resp.choices = [MagicMock()]
+        resp.choices[0].message.content = "[]"
+        return resp
+
+    monkeypatch.setattr("argus.models.client.completion", fake_completion)
+    _complete("sys", "user", "openrouter/openai/gpt-5.6-luna")
+    assert "models" not in captured["extra_body"]
 
 
 def test_pr_summary_appears_in_context_prompt():
@@ -140,6 +251,32 @@ def test_generate_pr_summary_includes_tech_stack_in_prompt(monkeypatch):
     assert "# Tech stack" in captured["messages"][1]["content"]
 
 
+def test_diff_truncated_adds_a_note_to_the_diff_header_in_context_prompt():
+    ctx = Context(diff="+x", changed_files=[], diff_truncated=True)
+    prompt = _context_prompt(ctx, "m", "sys")
+    assert "# Diff (truncated" in prompt
+
+
+def test_diff_not_truncated_omits_the_note_in_context_prompt():
+    ctx = Context(diff="+x", changed_files=[], diff_truncated=False)
+    prompt = _context_prompt(ctx, "m", "sys")
+    assert "# Diff\n" in prompt
+    assert "truncated" not in prompt
+
+
+def test_generate_pr_summary_includes_diff_truncated_note(monkeypatch):
+    captured = {}
+
+    def fake_completion(**kwargs):
+        captured["messages"] = kwargs["messages"]
+        return _fake_completion("brief")(**kwargs)
+
+    monkeypatch.setattr("argus.models.client.completion", fake_completion)
+    ctx = Context(diff="+x", changed_files=[], diff_truncated=True)
+    generate_pr_summary(ctx, "model")
+    assert "# Diff (truncated" in captured["messages"][1]["content"]
+
+
 def test_generate_pr_summary_returns_model_output(monkeypatch):
     monkeypatch.setattr(
         "argus.models.client.completion", _fake_completion("## Intent\nAdds a feature.")
@@ -147,6 +284,19 @@ def test_generate_pr_summary_returns_model_output(monkeypatch):
     ctx = Context(diff="+x", changed_files=[], pr_title="feat: add thing")
     result = generate_pr_summary(ctx, "model")
     assert "Adds a feature" in result
+
+
+def test_generate_pr_summary_threads_fallbacks_to_the_model_call(monkeypatch):
+    captured = {}
+
+    def fake_completion(**kwargs):
+        captured.update(kwargs)
+        return _fake_completion("brief")(**kwargs)
+
+    monkeypatch.setattr("argus.models.client.completion", fake_completion)
+    ctx = Context(diff="+x", changed_files=[])
+    generate_pr_summary(ctx, "openrouter/openai/gpt-5.6-luna", ["openrouter/openai/gpt-4o-mini"])
+    assert captured["extra_body"]["models"] == ["openai/gpt-5.6-luna", "openai/gpt-4o-mini"]
 
 
 def test_generate_pr_summary_returns_empty_on_error(monkeypatch):
@@ -231,6 +381,27 @@ def test_run_lens_coerces_string_line_numbers_to_int(monkeypatch):
     findings = run_lens(lens, Context(diff="+x", changed_files=[]), "m")
     assert findings[0].line == 42
     assert isinstance(findings[0].line, int)
+
+
+def test_run_lens_threads_fallbacks_to_the_model_call(monkeypatch):
+    captured = {}
+
+    def fake_completion(**kwargs):
+        captured.update(kwargs)
+        return _fake_completion("[]")(**kwargs)
+
+    monkeypatch.setattr("argus.models.client.completion", fake_completion)
+    lens = Lens(name="x", instructions="look for problems")
+    run_lens(
+        lens,
+        Context(diff="+x", changed_files=[]),
+        "openrouter/deepseek/deepseek-v4-flash",
+        ["openrouter/z-ai/glm-4.7-flash"],
+    )
+    assert captured["extra_body"]["models"] == [
+        "deepseek/deepseek-v4-flash",
+        "z-ai/glm-4.7-flash",
+    ]
 
 
 def test_run_lens_drops_unparseable_line_to_none(monkeypatch):

@@ -407,7 +407,7 @@ def test_reply_on_still_flagged_finding_triggers_recuration(monkeypatch):
 
     captured = {}
 
-    def fake_recurate(findings, replies, ctx, model):
+    def fake_recurate(findings, replies, ctx, model, fallbacks=None):
         captured.update(replies=replies, findings=findings)
         # Real recurate_with_replies mutates matching findings in place
         # (status/confidence/drop_reason) and never shrinks the list --
@@ -455,7 +455,7 @@ def test_reply_on_stale_finding_not_rediscovered_this_run_still_gets_recurated(m
 
     captured = {}
 
-    def fake_recurate(findings, replies, ctx, model):
+    def fake_recurate(findings, replies, ctx, model, fallbacks=None):
         captured["fingerprints"] = {ghmod._fingerprint(x) for x in findings}
         for finding in findings:
             if ghmod._fingerprint(finding) in replies:
@@ -499,7 +499,9 @@ def test_reply_on_stale_finding_kept_after_recuration_does_not_resolve_its_threa
     monkeypatch.setattr(ghmod, "_graphql_resolve_thread", lambda tid, tok: resolved.append(tid))
     # Curator considers the reply but keeps the finding -- status unchanged.
     monkeypatch.setattr(
-        ghmod, "recurate_with_replies", lambda findings, replies, ctx, model: findings
+        ghmod,
+        "recurate_with_replies",
+        lambda findings, replies, ctx, model, fallbacks=None: findings,
     )
 
     _post(findings=[], context=_ctx(changed_paths=["unrelated.py"]))
