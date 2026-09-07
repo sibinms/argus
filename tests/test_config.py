@@ -179,3 +179,25 @@ def test_project_standards_files_null_falls_back_to_default_instead_of_crashing(
     path = tmp_path / "config.yml"
     path.write_text("context:\n  project_standards_files:\n")
     assert load_config(path).context.project_standards_files == ["CLAUDE.md", "AGENTS.md"]
+
+
+def test_checks_default_to_all_builtin_checks_and_can_be_disabled(tmp_path):
+    from argus.config import BUILTIN_CHECKS
+
+    assert Config().checks == BUILTIN_CHECKS == ["comments"]
+    cfg = tmp_path / "c.yml"
+    cfg.write_text("checks: []\n")
+    assert load_config(cfg).checks == []
+    cfg.write_text("lenses:\n  - security\n")
+    assert load_config(cfg).checks == BUILTIN_CHECKS  # absent key keeps the default
+    cfg.write_text("checks: comments\n")
+    with pytest.raises(ValueError, match="checks"):
+        load_config(cfg)
+
+
+def test_example_and_dogfood_configs_list_all_builtin_checks():
+    from argus.config import BUILTIN_CHECKS
+
+    root = Path(__file__).parent.parent / ".argus"
+    assert set(load_config(root / "config.yml.example").checks) == set(BUILTIN_CHECKS)
+    assert set(load_config(root / "config.yml").checks) == set(BUILTIN_CHECKS)

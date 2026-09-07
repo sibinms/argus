@@ -22,6 +22,12 @@ BUILTIN_LENSES = [
     "efficiency",
 ]
 
+# Deterministic, model-free checks (see argus/checks/). Configured separately
+# from lenses so a repo can run either, both, or checks alone with `lenses: []`.
+BUILTIN_CHECKS = [
+    "comments",
+]
+
 
 @dataclass
 class ModelConfig:
@@ -107,6 +113,7 @@ class Config:
     mode: str = "active"  # shadow | active
     models: ModelConfig = field(default_factory=ModelConfig)
     lenses: list[str] = field(default_factory=lambda: list(BUILTIN_LENSES))
+    checks: list[str] = field(default_factory=lambda: list(BUILTIN_CHECKS))
     context: ContextConfig = field(default_factory=ContextConfig)
     posting: PostingConfig = field(default_factory=PostingConfig)
 
@@ -135,6 +142,8 @@ def load_config(path: Path | None = None) -> Config:
 
     if "lenses" in raw:
         _require_type(raw["lenses"], list, "lenses")
+    if "checks" in raw:
+        _require_type(raw["checks"], list, "checks")
     if "lens_fallbacks" in models_raw and models_raw["lens_fallbacks"] is not None:
         _require_type(models_raw["lens_fallbacks"], list, "models.lens_fallbacks")
     if "curator_fallbacks" in models_raw and models_raw["curator_fallbacks"] is not None:
@@ -183,6 +192,7 @@ def load_config(path: Path | None = None) -> Config:
             ),
         ),
         lenses=raw.get("lenses", list(BUILTIN_LENSES)),
+        checks=raw.get("checks", list(BUILTIN_CHECKS)),
         context=ContextConfig(
             max_files=context_raw.get("max_files", ContextConfig.max_files),
             max_bytes_per_file=context_raw.get(

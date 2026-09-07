@@ -56,6 +56,17 @@ lenses:
   - efficiency
   # - custom: .argus/lenses/payment-safety.md
 
+# Deterministic checks: plain code, no model call, no API key — they run the
+# same on every PR and their findings skip the curator (nothing to verify).
+# Configured separately from lenses so you can run either or both; with
+# `lenses: []` and only checks, a review never touches a model at all.
+#   comments — warns on any inline comment longer than one line (two or more
+#              consecutive comment lines) added in a language with a docstring idiom (Python, JS/TS,
+#              Java, Go, Rust, ...): move it into a function/class docstring.
+# Set to [] to disable.
+checks:
+  - comments
+
 context:
   max_files: 15
   max_bytes_per_file: 20000

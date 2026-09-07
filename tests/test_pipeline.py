@@ -90,3 +90,97 @@ def test_run_review_raises_when_all_lenses_fail(monkeypatch):
         run_review(context, config)
 
     assert not curate_called
+
+
+def _check_finding():
+    return Finding(
+        lens="comments",
+        file="a.py",
+        line=3,
+        summary="long",
+        detail="",
+        confidence="medium",
+        status="kept",
+    )
+
+
+def test_run_review_with_only_checks_never_calls_a_model(monkeypatch):
+    def boom(*args, **kwargs):
+        raise AssertionError("model call made in a checks-only review")
+
+    monkeypatch.setattr("argus.pipeline.run_lens", boom)
+    monkeypatch.setattr("argus.pipeline.generate_pr_summary", boom)
+    monkeypatch.setattr("argus.pipeline.curate", boom)
+    monkeypatch.setattr(
+        "argus.pipeline.load_checks", lambda names: [("comments", lambda ctx: [_check_finding()])]
+    )
+
+    config = Config(lenses=[], checks=["comments"])
+    findings = run_review(Context(diff="+x", changed_files=[]), config)
+
+    assert [f.lens for f in findings] == ["comments"]
+    assert findings[0].status == "kept"
+
+
+def test_check_findings_skip_the_curator_and_are_appended(monkeypatch):
+    lens_finding = Finding(
+        lens="security", file="a.py", line=1, summary="s", detail="", confidence="low"
+    )
+    monkeypatch.setattr(
+        "argus.pipeline.run_lens", lambda lens, context, model, fallbacks=(): [lens_finding]
+    )
+    monkeypatch.setattr(
+        "argus.pipeline.generate_pr_summary", lambda context, model, fallbacks=(): ""
+    )
+    seen_by_curator = []
+
+    def fake_curate(findings, context, model, fallbacks=()):
+        seen_by_curator.extend(findings)
+        return findings
+
+    monkeypatch.setattr("argus.pipeline.curate", fake_curate)
+    monkeypatch.setattr(
+        "argus.pipeline.load_checks", lambda names: [("comments", lambda ctx: [_check_finding()])]
+    )
+
+    config = Config(lenses=["security"], checks=["comments"])
+    findings = run_review(Context(diff="+x", changed_files=[]), config)
+
+    assert [f.lens for f in seen_by_curator] == ["security"]
+    assert [f.lens for f in findings] == ["security", "comments"]
+
+
+def test_run_review_survives_a_check_crashing(monkeypatch, caplog):
+    def broken(ctx):
+        raise RuntimeError("bug in check")
+
+    monkeypatch.setattr("argus.pipeline.load_checks", lambda names: [("comments", broken)])
+    monkeypatch.setattr(
+        "argus.pipeline.run_lens",
+        lambda lens, context, model, fallbacks=(): [
+            Finding(lens=lens.name, file="a.py", line=1, summary="s", detail="", confidence="low")
+        ],
+    )
+    monkeypatch.setattr(
+        "argus.pipeline.generate_pr_summary", lambda context, model, fallbacks=(): ""
+    )
+    monkeypatch.setattr(
+        "argus.pipeline.curate", lambda findings, context, model, fallbacks=(): findings
+    )
+
+    config = Config(lenses=["security"], checks=["comments"])
+    with caplog.at_level("WARNING"):
+        findings = run_review(Context(diff="+x", changed_files=[]), config)
+
+    assert [f.lens for f in findings] == ["security"]
+    assert "comments" in caplog.text
+
+
+def test_run_review_raises_when_checks_only_and_every_check_fails(monkeypatch):
+    def broken(ctx):
+        raise RuntimeError("bug in check")
+
+    monkeypatch.setattr("argus.pipeline.load_checks", lambda names: [("comments", broken)])
+    config = Config(lenses=[], checks=["comments"])
+    with pytest.raises(RuntimeError, match="All 1 check"):
+        run_review(Context(diff="+x", changed_files=[]), config)
