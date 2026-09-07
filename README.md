@@ -28,6 +28,7 @@ on your pull requests.
 -   🧭 A planner briefs every reviewer up front on intent and invariants
 -   🔍 Eight parallel specialized reviewers ("lenses"), plus your own
 -   🧠 Evidence-based curator
+-   🧹 Deterministic checks that need no model at all (e.g. long inline comments → "use a docstring")
 -   🤖 Bring your own LLM (OpenAI, Anthropic, Gemini, OpenRouter, any LiteLLM provider)
 -   🔒 Runs entirely in your GitHub Action or locally
 -   📝 Markdown-based custom lenses
@@ -86,6 +87,7 @@ reviewers as plain Markdown (see [Writing Custom Lenses](#writing-custom-lenses)
 | Planner | One cheap call reads the PR first and briefs every lens on intent, invariants and what to check. |
 | Eight Parallel Lenses | Independent reviewers, each focused on a different problem domain, plus any you add. |
 | Evidence-Based Curation | Findings are removed only when evidence contradicts them. |
+| Deterministic Checks | Model-free rules run alongside the lenses (currently: long inline comments that belong in a docstring). No API key, skip the curator. |
 | Provider Agnostic | Works with OpenAI, Anthropic, Gemini, OpenRouter and any LiteLLM provider. |
 | Data Residency (OpenRouter) | Every OpenRouter call defaults to Zero Data Retention and no training-data collection — not configurable, so it can't be missed. |
 | Custom Lenses | Create new reviewers using Markdown. |
@@ -265,6 +267,7 @@ Configure:
 
 -   Models (and, for OpenRouter, fallback models: `lens_fallbacks`/`curator_fallbacks`)
 -   Lenses
+-   Checks (deterministic, model-free — see [Deterministic checks](#deterministic-checks))
 -   Context limits
 -   Project standards files fed to every reviewer (`project_standards_files`)
 -   Tech stack context pulled from GitHub (`tech_stack`)
@@ -403,6 +406,29 @@ to say, never an invisible edit to something old:
   stays quiet.
 
 ------------------------------------------------------------------------
+
+## Deterministic checks
+
+Not every review rule needs a model. A **check** is plain code over the
+diff: it runs identically on every PR, costs nothing, needs no API key,
+and its findings skip the curator (there is nothing for a model to verify
+about "these two consecutive added lines are both comments"). Checks are
+configured separately from lenses:
+
+``` yaml
+checks:
+  - comments
+```
+
+Built-in checks:
+
+| Check | What it flags |
+| --- | --- |
+| `comments` | An inline comment longer than one line (two or more consecutive comment lines) added by the PR, in a language with a docstring or doc-comment idiom (Python, JS/TS, Java, Kotlin, Go, Rust, C/C++/C#, Swift, PHP, Ruby, …). Posts a medium-confidence warning: long inline comments are not recommended, move the explanation into the docstring of the function or class it describes (named when it can be found). Shebangs, license headers, pragmas (`# noqa`, `# type:`), doc comments, `TODO` blocks, and files with no docstring construct (YAML, shell, CI workflows, Markdown) are never flagged. |
+
+Set `checks: []` to turn them off. With `lenses: []` and only checks, a
+review never calls a model at all — handy for a repo that wants the
+deterministic rules without any provider key.
 
 ## Writing Custom Lenses
 

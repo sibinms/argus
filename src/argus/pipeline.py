@@ -11,6 +11,7 @@ from dataclasses import replace
 
 from argus.config import Config
 from argus.context.gather import Context
+from argus.checks import Check, load_checks
 from argus.curator.curate import curate
 from argus.lenses.base import Finding, Lens
 from argus.lenses.loader import load_lenses
@@ -36,8 +37,38 @@ def _run_lens_isolated(
         return None
 
 
+def _run_check_isolated(name: str, check: Check, context: Context) -> list[Finding] | None:
+    """Same contract as _run_lens_isolated: [] means the check ran and found
+    nothing, None means it blew up (a bug in the check, not a provider
+    outage) and was skipped."""
+    try:
+        return check(context)
+    except Exception:
+        logger.warning("check %r failed, skipping it for this review", name, exc_info=True)
+        return None
+
+
 def run_review(context: Context, config: Config) -> list[Finding]:
+    """Runs the configured deterministic checks and model lenses over the
+    context and returns every finding, curated where curation applies.
+
+    Checks go first: they are pure functions over the diff, so there is
+    nothing for the curator to verify — their findings come back already
+    marked "kept" and are appended after curation untouched. With no lenses
+    configured they are the whole review: no planner, no lens, no curator,
+    no model call at all.
+    """
     lenses = load_lenses(config.lenses)
+    checks = load_checks(config.checks)
+
+    check_results = [_run_check_isolated(name, check, context) for name, check in checks]
+    check_findings = [f for result in check_results if result is not None for f in result]
+    if not lenses:
+        if checks and all(result is None for result in check_results):
+            raise RuntimeError(
+                f"All {len(checks)} check(s) failed — refusing to post a review with no signal"
+            )
+        return check_findings
 
     # Planner: one cheap call before lenses fire. The brief it produces tells
     # every lens what the PR is trying to do and what invariants to verify —
@@ -70,4 +101,5 @@ def run_review(context: Context, config: Config) -> list[Finding]:
         )
 
     all_findings = [finding for result in results if result is not None for finding in result]
-    return curate(all_findings, context, config.models.curator, config.models.curator_fallbacks)
+    curated = curate(all_findings, context, config.models.curator, config.models.curator_fallbacks)
+    return curated + check_findings

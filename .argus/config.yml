@@ -26,6 +26,10 @@ lenses:
   - reuse
   - efficiency
 
+# Deterministic, model-free checks (run alongside the lenses, skip the curator).
+checks:
+  - comments
+
 context:
   ignore_globs:
     - "*.lock"

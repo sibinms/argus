@@ -85,6 +85,10 @@ class Context:
     # True when the diff exceeded context.max_diff_bytes and was cut at a
     # file boundary — see truncate_diff_parts in context/budget.py.
     diff_truncated: bool = False
+    # (path, patch) per file in `diff`, same truncation applied — a GitHub
+    # per-file patch has no header naming its file, so argus/checks/ read
+    # this rather than `diff`. Empty when a caller only fills `diff`.
+    file_patches: list[tuple[str, str]] = field(default_factory=list)
 
 
 def _read_file(path: str) -> str | None:
@@ -176,6 +180,20 @@ def _format_languages(languages: Mapping[str, object]) -> str:
     return ", ".join(parts)
 
 
+_PATCH_PATH_RE = re.compile(r"^\+\+\+ b/(.+)$", re.MULTILINE)
+_DIFF_GIT_RE = re.compile(r"^diff --git a/(.+?) b/(.+)$", re.MULTILINE)
+
+
+def _patch_path(part: str) -> str | None:
+    """New-side path of one git-style per-file diff chunk, or None if the
+    chunk has no recognisable header."""
+    m = _PATCH_PATH_RE.search(part)
+    if m:
+        return m.group(1)
+    m = _DIFF_GIT_RE.search(part)
+    return m.group(2) if m else None
+
+
 def _split_diff_by_file(diff: str) -> list[str]:
     """Splits a raw multi-file `git diff` blob back into one chunk per file,
     on the "diff --git a/... b/..." boundary each file's section starts
@@ -224,6 +242,7 @@ def gather_local(base_ref: str, head_ref: str, config: ContextConfig) -> Context
         _split_diff_by_file(diff), config.max_diff_bytes
     )
     diff = "\n".join(diff_parts)
+    file_patches = [(path, part) for part in diff_parts if (path := _patch_path(part)) is not None]
 
     files = [ChangedFile(path=p, content=_read_file(p)) for p in changed_paths]
     files = apply_budget(files, config)
@@ -285,6 +304,7 @@ def gather_local(base_ref: str, head_ref: str, config: ContextConfig) -> Context
         changed_paths=included_paths,
         project_standards=project_standards,
         diff_truncated=diff_truncated,
+        file_patches=file_patches,
     )
 
 
@@ -457,6 +477,10 @@ def gather_github(
     # narrowed to exclude a file whose diff hunk got truncated away here --
     # its full content may still have made it into `files` above regardless.
     diff_parts, diff_truncated = truncate_diff_parts(diff_parts, config.max_diff_bytes)
+    # diff_parts was built in `files` order (one entry per non-ignored file)
+    # and truncation only ever drops a tail, so zip lines them back up with
+    # their paths and stops at whatever survived.
+    file_patches = list(zip(changed_paths, diff_parts))
 
     # pr.base.sha, not pr.head.sha -- a PR shouldn't be able to rewrite its
     # own review rules within the same diff being reviewed.
@@ -474,4 +498,5 @@ def gather_github(
         project_standards=project_standards,
         tech_stack=tech_stack,
         diff_truncated=diff_truncated,
+        file_patches=file_patches,
     )
