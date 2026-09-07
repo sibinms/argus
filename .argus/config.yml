@@ -4,17 +4,17 @@
 # Switch to shadow to get a job-summary report without commenting.
 mode: active
 
-# DeepSeek (matches the DEEPSEEK_API_KEY passed by the workflow). Switched
-# off Gemini's free tier, which 429/503'd under this repo's own parallel
-# -lens load (the planner + 8 lenses + curator fire up to ~10 concurrent
-# calls per run) — a paid key gets a real rate limit instead of a free-tier
-# trickle, and DeepSeek is cheap enough that this barely matters on cost.
-# Flash for the lens (cheap, over-report), Pro for the curator (stronger
+# DashScope / Qwen (matches the DASHSCOPE_API_KEY passed by the workflow).
+# Switched off DeepSeek after its account balance ran out and every
+# self-review since 2026-08-21 failed with 402 Insufficient Balance; before
+# that, off Gemini's free tier, which 429/503'd under this repo's own
+# parallel-lens load (planner + 8 lenses + curator, ~10 concurrent calls).
+# Flash for the lens (cheap, over-report), Max for the curator (stronger
 # judgment). To use another provider, change these model strings and pass
 # that provider's key via the workflow's env: block instead.
 models:
-  lens: deepseek/deepseek-v4-flash
-  curator: deepseek/deepseek-v4-pro
+  lens: dashscope/qwen-flash
+  curator: dashscope/qwen-max
 
 lenses:
   - security
