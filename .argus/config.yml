@@ -13,8 +13,7 @@ mode: active
 # the curator (strongest Qwen with a long context — plain qwen-max is capped
 # at 30k tokens in litellm's table, which would truncate the curator's
 # context on any medium PR). Both are in litellm's pricing table, so the
-# per-model token budget applies. Stronger
-# judgment). To use another provider, change these model strings and pass
+# per-model token budget applies. To use another provider, change these model strings and pass
 # that provider's key via the workflow's env: block instead.
 models:
   lens: dashscope/qwen-flash
