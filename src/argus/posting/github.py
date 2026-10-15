@@ -229,6 +229,19 @@ def _last_bot_event(pr) -> str | None:
     return last
 
 
+def pr_is_draft(repo_full_name: str, pr_number: int, token: str) -> bool:
+    """Whether the PR is still a draft. Fails open: if the lookup itself
+    errors (network, auth, API blip), returns False so a legitimate ready
+    PR is never silently left unreviewed over a transient failure --
+    skipping drafts is a cost optimisation, not a correctness guarantee."""
+    try:
+        gh = Github(token, timeout=30)
+        return bool(gh.get_repo(repo_full_name).get_pull(pr_number).draft)
+    except Exception:
+        logger.warning("failed to read PR draft status, reviewing anyway", exc_info=True)
+        return False
+
+
 def last_reviewed_sha(repo_full_name: str, pr_number: int, token: str) -> str | None:
     """The commit SHA Argus's most recent formal review was posted against,
     read back from a hidden marker in that review's body. Lets a later run

@@ -150,6 +150,7 @@ def test_load_config_rejects_wrong_types(tmp_path):
         ("context:\n  tech_stack: yes-please\n", "context.tech_stack"),
         ("context:\n  max_diff_bytes: big\n", "context.max_diff_bytes"),
         ("models:\n  lens_fallbacks: openrouter/a/b\n", "models.lens_fallbacks"),
+        ("review_drafts: maybe\n", "review_drafts"),
         ("models:\n  curator_fallbacks: openrouter/a/b\n", "models.curator_fallbacks"),
         ("posting:\n  max_inline_comments: ten\n", "posting.max_inline_comments"),
     ]
@@ -201,3 +202,11 @@ def test_example_and_dogfood_configs_list_all_builtin_checks():
     root = Path(__file__).parent.parent / ".argus"
     assert set(load_config(root / "config.yml.example").checks) == set(BUILTIN_CHECKS)
     assert set(load_config(root / "config.yml").checks) == set(BUILTIN_CHECKS)
+
+
+def test_review_drafts_defaults_off_and_loads_when_set(tmp_path):
+    assert Config().review_drafts is False
+
+    path = tmp_path / "config.yml"
+    path.write_text("review_drafts: true\n")
+    assert load_config(path).review_drafts is True
