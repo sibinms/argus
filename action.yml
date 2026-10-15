@@ -51,6 +51,13 @@ inputs:
       models.curator_fallbacks from .argus/config.yml.
     required: false
     default: ""
+  review-drafts:
+    description: >
+      Set to "true" to review draft PRs too. By default a draft is skipped
+      entirely (no model calls) until it's marked ready. Overrides
+      review_drafts from .argus/config.yml.
+    required: false
+    default: ""
   pr:
     description: >
       PR number to review. Auto-detected from the GitHub event when omitted.
@@ -84,6 +91,7 @@ runs:
         ARGUS_CURATOR_MODEL: ${{ inputs.curator-model }}
         ARGUS_LENS_MODEL_FALLBACKS: ${{ inputs.lens-model-fallbacks }}
         ARGUS_CURATOR_MODEL_FALLBACKS: ${{ inputs.curator-model-fallbacks }}
+        ARGUS_REVIEW_DRAFTS: ${{ inputs.review-drafts }}
         ARGUS_ANTHROPIC_API_KEY_INPUT: ${{ inputs.anthropic-api-key }}
         ARGUS_PR_INPUT: ${{ inputs.pr }}
       run: |
@@ -112,5 +120,8 @@ runs:
         fi
         if [ -n "$ARGUS_CURATOR_MODEL_FALLBACKS" ]; then
           args+=(--curator-model-fallbacks "$ARGUS_CURATOR_MODEL_FALLBACKS")
+        fi
+        if [ "$ARGUS_REVIEW_DRAFTS" = "true" ]; then
+          args+=(--review-drafts)
         fi
         argus review "${args[@]}"

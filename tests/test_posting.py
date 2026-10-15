@@ -842,3 +842,36 @@ def test_graphql_returns_body_on_success(monkeypatch):
     monkeypatch.setattr(ghmod.urllib.request, "urlopen", lambda request, timeout: FakeResponse())
 
     assert ghmod._graphql("query { x }", {}, "token") == {"data": {"x": 1}}
+
+
+# ---- pr_is_draft ----
+
+
+def test_pr_is_draft_true_for_a_draft(monkeypatch):
+    pr = MagicMock()
+    pr.draft = True
+    gh = MagicMock()
+    gh.get_repo.return_value.get_pull.return_value = pr
+    monkeypatch.setattr(ghmod, "Github", lambda *a, **k: gh)
+    assert ghmod.pr_is_draft("o/r", 1, "tok") is True
+
+
+def test_pr_is_draft_false_for_a_ready_pr(monkeypatch):
+    pr = MagicMock()
+    pr.draft = False
+    gh = MagicMock()
+    gh.get_repo.return_value.get_pull.return_value = pr
+    monkeypatch.setattr(ghmod, "Github", lambda *a, **k: gh)
+    assert ghmod.pr_is_draft("o/r", 1, "tok") is False
+
+
+def test_pr_is_draft_fails_open_on_lookup_error(monkeypatch, caplog):
+    # Skipping drafts is a cost optimisation, not a correctness guarantee --
+    # a transient API failure must never leave a ready PR unreviewed.
+    def boom(*a, **k):
+        raise TimeoutError("network is unreachable")
+
+    monkeypatch.setattr(ghmod, "Github", boom)
+    with caplog.at_level("WARNING"):
+        assert ghmod.pr_is_draft("o/r", 1, "tok") is False
+    assert "draft" in caplog.text

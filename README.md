@@ -273,6 +273,7 @@ Configure:
 -   Tech stack context pulled from GitHub (`tech_stack`)
 -   Confidence thresholds
 -   Review mode (shadow / active)
+-   Whether draft PRs get reviewed (`review_drafts`, off by default)
 -   Whether a clean PR gets a real **Approved** review (`approve_reviews`)
 
 See `.argus/config.yml.example`.
@@ -282,6 +283,18 @@ all — the Action's `lens-model`/`curator-model` inputs and the CLI's
 `--lens-model`/`--curator-model` flags override whatever `.argus/config.yml`
 says (or the defaults, if there's no file). Useful for a quick test of a
 different model; commit the config file once you've settled on one.
+
+### Draft PRs
+
+Draft PRs are skipped entirely by default — no model calls, no review, just a
+one-line log saying so. A draft is work in progress, and reviewing every push
+to one spends tokens on code the author already knows is unfinished. The PR
+gets its first review on the first push after it's marked ready.
+
+Set `review_drafts: true` in `.argus/config.yml` (or the Action's
+`review-drafts` input / the CLI's `--review-drafts` flag) to review drafts
+too. If the draft-status lookup itself fails, Argus reviews anyway rather
+than silently skipping a ready PR over a transient API error.
 
 ### OpenRouter fallback models
 
