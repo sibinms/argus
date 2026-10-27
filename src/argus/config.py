@@ -111,14 +111,13 @@ class PostingConfig:
 @dataclass
 class Config:
     mode: str = "active"  # shadow | active
-    # Skip draft PRs entirely (no model calls, no review) until they're
-    # marked ready. On by default: a draft is work in progress, and
-    # reviewing every push to one burns tokens on code the author already
-    # knows is unfinished. Set review_drafts: true to review drafts too.
-    # Note the flip side: a draft marked ready without a new push won't get
-    # an automatic review until its next push (CI triggers fire on pushes),
-    # so nudge Argus with a push or a re-run if you need one sooner.
-    review_drafts: bool = False
+    # Opt-in: skip draft PRs entirely (no model calls, no review) until
+    # they're marked ready. Off by default so a draft gets the same review
+    # as any other PR; turn it on where reviewing every push to a draft
+    # would burn tokens on code the author already knows is unfinished.
+    # Flip side when on: a draft marked ready without a new push won't get
+    # an automatic review until its next push (CI triggers fire on pushes).
+    skip_drafts: bool = False
     models: ModelConfig = field(default_factory=ModelConfig)
     lenses: list[str] = field(default_factory=lambda: list(BUILTIN_LENSES))
     checks: list[str] = field(default_factory=lambda: list(BUILTIN_CHECKS))
@@ -150,8 +149,8 @@ def load_config(path: Path | None = None) -> Config:
 
     if "lenses" in raw:
         _require_type(raw["lenses"], list, "lenses")
-    if "review_drafts" in raw:
-        _require_type(raw["review_drafts"], bool, "review_drafts")
+    if "skip_drafts" in raw:
+        _require_type(raw["skip_drafts"], bool, "skip_drafts")
     if "checks" in raw:
         _require_type(raw["checks"], list, "checks")
     if "lens_fallbacks" in models_raw and models_raw["lens_fallbacks"] is not None:
@@ -180,7 +179,7 @@ def load_config(path: Path | None = None) -> Config:
 
     return Config(
         mode=raw.get("mode", "active"),
-        review_drafts=raw.get("review_drafts", Config.review_drafts),
+        skip_drafts=raw.get("skip_drafts", Config.skip_drafts),
         models=ModelConfig(
             lens=models_raw.get("lens", ModelConfig.lens),
             curator=models_raw.get("curator", ModelConfig.curator),

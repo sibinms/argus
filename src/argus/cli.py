@@ -107,11 +107,12 @@ def init():
     ),
 )
 @click.option(
-    "--review-drafts",
+    "--skip-drafts",
     is_flag=True,
     default=False,
-    help="Review draft PRs too. By default a draft is skipped entirely (no model calls) "
-    "until it's marked ready; overrides review_drafts from .argus/config.yml.",
+    help="Skip draft PRs entirely (no model calls) until they're marked ready. Off by "
+    "default: drafts are reviewed like any other PR. Overrides skip_drafts from "
+    ".argus/config.yml.",
 )
 def review(
     config_path,
@@ -125,7 +126,7 @@ def review(
     curator_model,
     lens_model_fallbacks,
     curator_model_fallbacks,
-    review_drafts,
+    skip_drafts,
 ):
     """Runs the panel against a local diff or a GitHub PR."""
     config = load_config(config_path)
@@ -143,8 +144,8 @@ def review(
         config.models.curator_fallbacks = [
             m.strip() for m in curator_model_fallbacks.split(",") if m.strip()
         ]
-    if review_drafts:
-        config.review_drafts = True
+    if skip_drafts:
+        config.skip_drafts = True
 
     if github:
         if repo is None or pr_number is None:
@@ -168,14 +169,11 @@ def review(
                 raise click.ClickException(
                     "Set GITHUB_TOKEN, or GITHUB_APP_ID + GITHUB_APP_PRIVATE_KEY for App auth."
                 )
-        if not config.review_drafts and pr_is_draft(repo, pr_number, token):
-            # A draft is work in progress -- reviewing every push to one
-            # burns tokens on code the author already knows is unfinished.
+        if config.skip_drafts and pr_is_draft(repo, pr_number, token):
             # Exit 0, not an error: skipping is the configured behaviour.
             click.echo(
-                f"{repo}#{pr_number} is a draft, skipping the review. "
-                "It'll be reviewed on its first push after being marked ready "
-                "(or set review_drafts: true to review drafts too)."
+                f"{repo}#{pr_number} is a draft and skip_drafts is on, skipping the review. "
+                "It'll be reviewed on its first push after being marked ready."
             )
             return
 
