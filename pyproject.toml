@@ -1,6 +1,6 @@
 [project]
 name = "argus-pr-review"
-version = "1.2.37"
+version = "1.2.38"
 
 description = "An open source AI PR reviewer built from many narrow lenses and one careful curator"
 readme = "README.md"
@@ -12,6 +12,9 @@ dependencies = [
     "PyGithub>=2.3.0",
     "PyYAML>=6.0",
     "click>=8.1.0",
+    # Transitive (litellm -> huggingface-hub) with no upper bound there; floored
+    # here for CVE-2026-112907/112913/112940, which fail CI's pip-audit step.
+    "filelock>=4.2.1",
 ]
 
 [project.scripts]

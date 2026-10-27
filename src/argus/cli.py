@@ -13,7 +13,7 @@ from argus.config import DEFAULT_CONFIG_PATH, load_config
 from argus.context.gather import gather_github, gather_local
 from argus.github_app import get_installation_token
 from argus.pipeline import run_review
-from argus.posting.github import last_reviewed_sha, post_to_github
+from argus.posting.github import last_reviewed_sha, post_to_github, pr_is_draft
 from argus.posting.shadow import write_shadow_report
 
 
@@ -106,6 +106,14 @@ def init():
         "(rate-limited, down, ...). OpenRouter-only; overrides models.curator_fallbacks."
     ),
 )
+@click.option(
+    "--skip-drafts",
+    is_flag=True,
+    default=False,
+    help="Skip draft PRs entirely (no model calls) until they're marked ready. Off by "
+    "default: drafts are reviewed like any other PR. Overrides skip_drafts from "
+    ".argus/config.yml.",
+)
 def review(
     config_path,
     github,
@@ -118,6 +126,7 @@ def review(
     curator_model,
     lens_model_fallbacks,
     curator_model_fallbacks,
+    skip_drafts,
 ):
     """Runs the panel against a local diff or a GitHub PR."""
     config = load_config(config_path)
@@ -135,6 +144,8 @@ def review(
         config.models.curator_fallbacks = [
             m.strip() for m in curator_model_fallbacks.split(",") if m.strip()
         ]
+    if skip_drafts:
+        config.skip_drafts = True
 
     if github:
         if repo is None or pr_number is None:
@@ -158,6 +169,14 @@ def review(
                 raise click.ClickException(
                     "Set GITHUB_TOKEN, or GITHUB_APP_ID + GITHUB_APP_PRIVATE_KEY for App auth."
                 )
+        if config.skip_drafts and pr_is_draft(repo, pr_number, token):
+            # Exit 0, not an error: skipping is the configured behaviour.
+            click.echo(
+                f"{repo}#{pr_number} is a draft and skip_drafts is on, skipping the review. "
+                "It'll be reviewed on its first push after being marked ready."
+            )
+            return
+
         since_sha = last_reviewed_sha(repo, pr_number, token)
         context = gather_github(repo, pr_number, token, config.context, since_sha=since_sha)
     else:

@@ -5,6 +5,14 @@
 #         while you're building trust in a new repo or a new set of lenses
 mode: active
 
+# Opt-in: set to true to skip draft PRs entirely (no model calls, no review)
+# until they're marked ready — useful where reviewing every push to a draft
+# would burn tokens on code the author already knows is unfinished. Off by
+# default, so drafts are reviewed like any other PR. Note when on: a draft
+# marked ready without a new push won't get an automatic review until its
+# next push, since CI triggers fire on pushes.
+skip_drafts: false
+
 # Any provider litellm supports works here — mix providers freely, e.g.
 # lens: gpt-4o-mini with curator: claude-opus-4-8. Set whichever provider's
 # API key as an env var (ANTHROPIC_API_KEY, OPENAI_API_KEY, GEMINI_API_KEY,

@@ -219,6 +219,7 @@ def test_github_app_credentials_used_when_both_present(tmp_path, monkeypatch):
         cli, "get_installation_token", lambda app_id, key, repo: "app-installation-token"
     )
     monkeypatch.setattr(cli, "last_reviewed_sha", lambda *a, **k: None)
+    monkeypatch.setattr(cli, "pr_is_draft", lambda *a, **k: False)
     monkeypatch.setattr(
         cli,
         "gather_github",
@@ -245,6 +246,7 @@ def test_falls_back_to_github_token_when_app_credentials_absent(tmp_path, monkey
     captured = {}
     monkeypatch.setattr(cli, "get_installation_token", boom)
     monkeypatch.setattr(cli, "last_reviewed_sha", lambda *a, **k: None)
+    monkeypatch.setattr(cli, "pr_is_draft", lambda *a, **k: False)
     monkeypatch.setattr(
         cli,
         "gather_github",
@@ -286,6 +288,7 @@ def test_only_app_id_set_falls_back_to_github_token(tmp_path, monkeypatch):
     captured = {}
     monkeypatch.setattr(cli, "get_installation_token", boom)
     monkeypatch.setattr(cli, "last_reviewed_sha", lambda *a, **k: None)
+    monkeypatch.setattr(cli, "pr_is_draft", lambda *a, **k: False)
     monkeypatch.setattr(
         cli,
         "gather_github",
@@ -312,6 +315,7 @@ def test_only_app_private_key_set_falls_back_to_github_token(tmp_path, monkeypat
     captured = {}
     monkeypatch.setattr(cli, "get_installation_token", boom)
     monkeypatch.setattr(cli, "last_reviewed_sha", lambda *a, **k: None)
+    monkeypatch.setattr(cli, "pr_is_draft", lambda *a, **k: False)
     monkeypatch.setattr(
         cli,
         "gather_github",
@@ -384,3 +388,91 @@ def test_model_flags_absent_leave_config_defaults(tmp_path, monkeypatch):
     default = Config()
     assert seen_configs[0].models.lens == default.models.lens
     assert seen_configs[0].models.curator == default.models.curator
+
+
+def _mock_github_review_path(monkeypatch, review_calls):
+    monkeypatch.delenv("GITHUB_APP_ID", raising=False)
+    monkeypatch.delenv("GITHUB_APP_PRIVATE_KEY", raising=False)
+    monkeypatch.setenv("GITHUB_TOKEN", "tok")
+    monkeypatch.setattr(cli, "last_reviewed_sha", lambda *a, **k: None)
+    monkeypatch.setattr(cli, "gather_github", lambda *a, **k: object())
+    monkeypatch.setattr(
+        cli, "run_review", lambda context, config: review_calls.append(config) or []
+    )
+    monkeypatch.setattr(cli, "post_to_github", lambda *a, **k: None)
+
+
+def test_draft_pr_is_reviewed_by_default(monkeypatch):
+    review_calls: list = []
+    _mock_github_review_path(monkeypatch, review_calls)
+
+    def boom(*a, **k):
+        raise AssertionError("draft status should not even be checked unless skip_drafts is on")
+
+    monkeypatch.setattr(cli, "pr_is_draft", boom)
+
+    runner = CliRunner()
+    result = runner.invoke(cli.main, ["review", "--github", "--repo", "o/r", "--pr", "7"])
+
+    assert result.exit_code == 0
+    assert len(review_calls) == 1
+
+
+def test_skip_drafts_flag_skips_a_draft_without_any_model_calls(monkeypatch):
+    review_calls: list = []
+    _mock_github_review_path(monkeypatch, review_calls)
+    monkeypatch.setattr(cli, "pr_is_draft", lambda *a, **k: True)
+
+    runner = CliRunner()
+    result = runner.invoke(
+        cli.main, ["review", "--github", "--repo", "o/r", "--pr", "7", "--skip-drafts"]
+    )
+
+    # Exit 0, not an error: skipping is the configured behaviour, and a
+    # non-zero exit would show a red X on every draft push.
+    assert result.exit_code == 0
+    assert "draft" in result.output
+    assert review_calls == []
+
+
+def test_skip_drafts_config_key_skips_a_draft(tmp_path, monkeypatch):
+    review_calls: list = []
+    _mock_github_review_path(monkeypatch, review_calls)
+    monkeypatch.setattr(cli, "pr_is_draft", lambda *a, **k: True)
+    config_path = tmp_path / "config.yml"
+    config_path.write_text("skip_drafts: true\n")
+
+    runner = CliRunner()
+    result = runner.invoke(
+        cli.main,
+        ["review", "--github", "--repo", "o/r", "--pr", "7", "--config", str(config_path)],
+    )
+
+    assert result.exit_code == 0
+    assert review_calls == []
+
+
+def test_skip_drafts_still_reviews_a_ready_pr(monkeypatch):
+    review_calls: list = []
+    _mock_github_review_path(monkeypatch, review_calls)
+    monkeypatch.setattr(cli, "pr_is_draft", lambda *a, **k: False)
+
+    runner = CliRunner()
+    result = runner.invoke(
+        cli.main, ["review", "--github", "--repo", "o/r", "--pr", "7", "--skip-drafts"]
+    )
+
+    assert result.exit_code == 0
+    assert len(review_calls) == 1
+
+
+def test_non_draft_pr_is_reviewed(monkeypatch):
+    review_calls: list = []
+    _mock_github_review_path(monkeypatch, review_calls)
+    monkeypatch.setattr(cli, "pr_is_draft", lambda *a, **k: False)
+
+    runner = CliRunner()
+    result = runner.invoke(cli.main, ["review", "--github", "--repo", "o/r", "--pr", "7"])
+
+    assert result.exit_code == 0
+    assert len(review_calls) == 1

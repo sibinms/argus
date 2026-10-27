@@ -110,7 +110,7 @@ the workflow, as shown below.
 **Anthropic**
 
 ``` yaml
-- uses: sibinms/argus@v1.2.37
+- uses: sibinms/argus@v1.2.38
   with:
     anthropic-api-key: ${{ secrets.ANTHROPIC_API_KEY }}
 ```
@@ -118,7 +118,7 @@ the workflow, as shown below.
 **OpenAI**
 
 ``` yaml
-- uses: sibinms/argus@v1.2.37
+- uses: sibinms/argus@v1.2.38
   env:
     OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
   with:
@@ -129,7 +129,7 @@ the workflow, as shown below.
 **Gemini**
 
 ``` yaml
-- uses: sibinms/argus@v1.2.37
+- uses: sibinms/argus@v1.2.38
   env:
     GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
   with:
@@ -140,7 +140,7 @@ the workflow, as shown below.
 **OpenRouter** — one key, hundreds of models across providers.
 
 ``` yaml
-- uses: sibinms/argus@v1.2.37
+- uses: sibinms/argus@v1.2.38
   env:
     OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
   with:
@@ -164,7 +164,7 @@ both are present, so a workflow-level pick always wins for a quick test.
 ### CLI
 
 ``` bash
-pip install "git+https://github.com/sibinms/argus.git@v1.2.37"
+pip install "git+https://github.com/sibinms/argus.git@v1.2.38"
 argus init
 
 export ANTHROPIC_API_KEY=...   # or OPENAI_API_KEY, GEMINI_API_KEY, ...
@@ -199,7 +199,7 @@ steps:
     args:
       - -c
       - |
-        pip install "git+https://github.com/sibinms/argus.git@v1.2.37"
+        pip install "git+https://github.com/sibinms/argus.git@v1.2.38"
         argus review \
           --github \
           --repo $$REPO_FULL_NAME \
@@ -273,6 +273,7 @@ Configure:
 -   Tech stack context pulled from GitHub (`tech_stack`)
 -   Confidence thresholds
 -   Review mode (shadow / active)
+-   Whether draft PRs are skipped (`skip_drafts`, off by default)
 -   Whether a clean PR gets a real **Approved** review (`approve_reviews`)
 
 See `.argus/config.yml.example`.
@@ -282,6 +283,19 @@ all — the Action's `lens-model`/`curator-model` inputs and the CLI's
 `--lens-model`/`--curator-model` flags override whatever `.argus/config.yml`
 says (or the defaults, if there's no file). Useful for a quick test of a
 different model; commit the config file once you've settled on one.
+
+### Draft PRs
+
+Draft PRs are reviewed like any other PR by default. If reviewing every push
+to a draft would spend tokens on code the author already knows is unfinished,
+set `skip_drafts: true` in `.argus/config.yml` (or the Action's `skip-drafts`
+input / the CLI's `--skip-drafts` flag). A draft is then skipped entirely — no
+model calls, no review, just a one-line log saying so — and gets its first
+review on the first push after it's marked ready.
+
+With skipping on, the draft-status lookup fails open: if it errors, Argus
+reviews anyway rather than silently skipping a ready PR over a transient API
+blip.
 
 ### OpenRouter fallback models
 
