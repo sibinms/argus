@@ -708,3 +708,152 @@ def test_untrusted_input_lines_match_what_each_call_actually_receives():
     assert "file content" in CURATOR_SYSTEM_PROMPT
     assert "reply text" in CURATOR_SYSTEM_PROMPT
     assert "PR title" in CURATOR_SYSTEM_PROMPT
+
+
+# ---- Straitly ----
+
+
+def _capturing_completion(captured):
+    def fake(**kwargs):
+        captured.update(kwargs)
+        resp = MagicMock()
+        resp.choices = [MagicMock()]
+        resp.choices[0].message.content = "[]"
+        return resp
+
+    return fake
+
+
+def test_complete_routes_straitly_through_openai_compatible_endpoint(monkeypatch):
+    captured = {}
+    monkeypatch.setattr("argus.models.client.completion", _capturing_completion(captured))
+    monkeypatch.setenv("STRAITLY_API_KEY", "sk-test")
+    monkeypatch.delenv("STRAITLY_API_BASE", raising=False)
+
+    _complete("sys", "user", "straitly/claude-sonnet-5")
+
+    assert captured["model"] == "openai/claude-sonnet-5"
+    assert captured["api_base"] == "https://api.straitly.ai/v1"
+    assert captured["api_key"] == "sk-test"
+    # OpenRouter-only knobs must not leak to Straitly.
+    assert "extra_body" not in captured
+
+
+def test_complete_straitly_honours_api_base_override(monkeypatch):
+    captured = {}
+    monkeypatch.setattr("argus.models.client.completion", _capturing_completion(captured))
+    monkeypatch.setenv("STRAITLY_API_KEY", "sk-test")
+    monkeypatch.setenv("STRAITLY_API_BASE", "https://proxy.example/v1")
+
+    _complete("sys", "user", "straitly/qwen/qwen3.7-flash")
+
+    assert captured["model"] == "openai/qwen/qwen3.7-flash"
+    assert captured["api_base"] == "https://proxy.example/v1"
+
+
+def test_complete_straitly_fails_fast_without_a_key(monkeypatch):
+    def boom(**kwargs):
+        raise AssertionError("no request should be made without a key")
+
+    monkeypatch.setattr("argus.models.client.completion", boom)
+    monkeypatch.delenv("STRAITLY_API_KEY", raising=False)
+
+    with pytest.raises(RuntimeError, match="STRAITLY_API_KEY"):
+        _complete("sys", "user", "straitly/claude-sonnet-5")
+
+
+def test_complete_leaves_non_straitly_models_untouched(monkeypatch):
+    captured = {}
+    monkeypatch.setattr("argus.models.client.completion", _capturing_completion(captured))
+    monkeypatch.delenv("STRAITLY_API_KEY", raising=False)
+
+    _complete("sys", "user", "claude-haiku-4-5")
+
+    assert captured["model"] == "claude-haiku-4-5"
+    assert "api_base" not in captured
+    assert "api_key" not in captured
+
+
+def test_straitly_fallbacks_do_not_produce_an_openrouter_models_field():
+    assert _openrouter_models_field("straitly/claude-sonnet-5", ["straitly/gpt-5.6-luna"]) is None
+
+
+def test_max_input_tokens_uses_straitly_context_length(monkeypatch):
+    from argus.models import client as c
+
+    monkeypatch.setattr(c, "_straitly_context_lengths", lambda: {"claude-sonnet-5": 1_000_000})
+
+    def boom(model):
+        raise AssertionError("litellm's table should not be consulted when Straitly knows the id")
+
+    monkeypatch.setattr(c, "get_model_info", boom)
+
+    assert _max_input_tokens("straitly/claude-sonnet-5") == int(1_000_000 * 0.9)
+
+
+def test_max_input_tokens_falls_back_to_litellm_for_unlisted_straitly_id(monkeypatch):
+    from argus.models import client as c
+
+    monkeypatch.setattr(c, "_straitly_context_lengths", lambda: {})
+    seen = {}
+
+    def fake_info(model):
+        seen["model"] = model
+        return {"max_input_tokens": 200_000}
+
+    monkeypatch.setattr(c, "get_model_info", fake_info)
+
+    assert _max_input_tokens("straitly/claude-haiku-4.5") == int(200_000 * 0.9)
+    assert seen["model"] == "claude-haiku-4.5"  # bare id, no straitly/ or openai/ prefix
+
+
+def test_max_input_tokens_none_for_straitly_id_nobody_knows(monkeypatch):
+    from argus.models import client as c
+
+    monkeypatch.setattr(c, "_straitly_context_lengths", lambda: {})
+    assert _max_input_tokens("straitly/totally-made-up") is None
+
+
+def test_straitly_context_lengths_degrades_to_empty_on_fetch_failure(monkeypatch, caplog):
+    from argus.models import client as c
+
+    def boom(*a, **k):
+        raise TimeoutError("unreachable")
+
+    monkeypatch.setattr(c.urllib.request, "urlopen", boom)
+    c._straitly_context_lengths.cache_clear()
+    try:
+        with caplog.at_level("WARNING"):
+            assert c._straitly_context_lengths() == {}
+        assert "Straitly" in caplog.text
+    finally:
+        c._straitly_context_lengths.cache_clear()
+
+
+def test_straitly_context_lengths_parses_model_list(monkeypatch):
+    from argus.models import client as c
+
+    class FakeResponse:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+        def read(self):
+            return json.dumps(
+                {
+                    "data": [
+                        {"id": "claude-sonnet-5", "context_length": 1000000},
+                        {"id": "no-context"},
+                        "garbage",
+                    ]
+                }
+            ).encode()
+
+    monkeypatch.setattr(c.urllib.request, "urlopen", lambda request, timeout: FakeResponse())
+    c._straitly_context_lengths.cache_clear()
+    try:
+        assert c._straitly_context_lengths() == {"claude-sonnet-5": 1000000}
+    finally:
+        c._straitly_context_lengths.cache_clear()

@@ -10,6 +10,12 @@ key as an environment variable (ANTHROPIC_API_KEY, OPENAI_API_KEY,
 GEMINI_API_KEY, ...) — see https://docs.litellm.ai/docs/providers for the
 full list. Lens and curator can each point at a different provider.
 
+One exception: "straitly/<model-id>" (e.g. "straitly/claude-sonnet-5") is
+Argus's own prefix for Straitly (https://straitly.ai), an OpenAI-compatible
+gateway litellm has no native provider entry for. It's rewritten to
+litellm's generic "openai/" route pointed at Straitly's base URL with
+STRAITLY_API_KEY — see _litellm_model and _straitly_kwargs.
+
 Split deliberately: lenses are meant to run on a cheap model asked to
 over-report, the curator on a stronger model asked to only kill a finding
 when it can point at contradicting evidence. Which model plays which role
@@ -18,8 +24,11 @@ is set in .argus/config.yml, not hardcoded here.
 
 from __future__ import annotations
 
+import functools
 import json
 import logging
+import os
+import urllib.request
 from collections.abc import Sequence
 from concurrent.futures import ThreadPoolExecutor
 from concurrent.futures import TimeoutError as FutureTimeoutError
@@ -50,22 +59,91 @@ _INPUT_TOKEN_SAFETY_MARGIN = 0.9
 # blocking the rest of the review indefinitely, which is the actual goal.
 _WALL_CLOCK_TIMEOUT = 180
 
+# Straitly (https://straitly.ai): one OpenAI-compatible endpoint in front of
+# many labs' models, zero data retention on every request by default (no
+# header or setting to get right — https://straitly.ai/docs/data-retention).
+# litellm has no provider entry for it, so "straitly/<id>" is Argus's own
+# prefix: rewritten to litellm's generic "openai/" route with api_base and
+# api_key pointed at Straitly.
+STRAITLY_PREFIX = "straitly/"
+STRAITLY_API_BASE = "https://api.straitly.ai/v1"
+
+
+def _is_straitly(model: str) -> bool:
+    return model.startswith(STRAITLY_PREFIX)
+
+
+def _straitly_api_base() -> str:
+    return os.environ.get("STRAITLY_API_BASE") or STRAITLY_API_BASE
+
+
+def _litellm_model(model: str) -> str:
+    """The string litellm actually routes on. Identity for every provider
+    litellm knows natively; "straitly/x" becomes "openai/x" (Straitly
+    speaks OpenAI's chat-completions dialect) with the endpoint supplied
+    separately by _straitly_kwargs."""
+    if _is_straitly(model):
+        return "openai/" + model.removeprefix(STRAITLY_PREFIX)
+    return model
+
+
+def _straitly_kwargs(model: str) -> dict:
+    key = os.environ.get("STRAITLY_API_KEY")
+    if not key:
+        raise RuntimeError(
+            f"model {model!r} routes through Straitly but STRAITLY_API_KEY is not set"
+        )
+    return {"api_base": _straitly_api_base(), "api_key": key}
+
+
+@functools.lru_cache(maxsize=1)
+def _straitly_context_lengths() -> dict[str, int]:
+    """Context window per model id from Straitly's public model list
+    (GET /models needs no key). litellm's own pricing table doesn't know
+    these ids, and a model with no known limit means no input-token budget
+    at all — the exact combination that hung a review for 20+ minutes in
+    #79 — so ask Straitly directly. Fetched once per process; any failure
+    degrades to "unknown" (empty), never to an error."""
+    try:
+        request = urllib.request.Request(
+            f"{_straitly_api_base()}/models", headers={"Accept": "application/json"}
+        )
+        with urllib.request.urlopen(request, timeout=10) as response:  # nosec B310
+            body = json.loads(response.read().decode("utf-8"))
+        return {
+            m["id"]: int(m["context_length"])
+            for m in body.get("data", [])
+            if isinstance(m, dict) and m.get("id") and m.get("context_length")
+        }
+    except Exception:
+        logger.warning("couldn't fetch Straitly's model list for context limits", exc_info=True)
+        return {}
+
 
 def _max_input_tokens(model: str) -> int | None:
-    try:
-        limit = get_model_info(model).get("max_input_tokens")
-    except Exception:
-        # Model not in litellm's database (custom/unlisted provider model) —
-        # no known limit to trim against, so leave the prompt as built.
-        logger.debug("no known input token limit for model %s", model, exc_info=True)
-        return None
+    limit = None
+    if _is_straitly(model):
+        model_id = model.removeprefix(STRAITLY_PREFIX)
+        limit = _straitly_context_lengths().get(model_id)
+        # Not in Straitly's list: litellm may still know the bare id
+        # (e.g. "claude-sonnet-5"), so fall through with that.
+        model = model_id
+    if limit is None:
+        try:
+            limit = get_model_info(model).get("max_input_tokens")
+        except Exception:
+            # Model not in litellm's database (custom/unlisted provider
+            # model) — no known limit to trim against, so leave the prompt
+            # as built.
+            logger.debug("no known input token limit for model %s", model, exc_info=True)
+            return None
     return int(limit * _INPUT_TOKEN_SAFETY_MARGIN) if limit else None
 
 
 def _count_tokens(model: str, system_prompt: str, user_prompt: str) -> int | None:
     try:
         return token_counter(
-            model=model,
+            model=_litellm_model(model),
             messages=[
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt},
@@ -320,7 +398,9 @@ def _complete(
     system_prompt: str, user_prompt: str, model: str, fallbacks: Sequence[str] = ()
 ) -> str:
     kwargs: dict = {}
-    if model.startswith("openrouter/"):
+    if _is_straitly(model):
+        kwargs.update(_straitly_kwargs(model))
+    elif model.startswith("openrouter/"):
         # Argus sends PR diffs and file content off-repo on every call; for
         # OpenRouter specifically that fans out to whichever underlying
         # provider it routes to, so default every request to Zero Data
@@ -334,7 +414,7 @@ def _complete(
 
     def _call() -> str:
         response = completion(
-            model=model,
+            model=_litellm_model(model),
             messages=[
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt},
