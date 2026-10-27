@@ -273,7 +273,7 @@ Configure:
 -   Tech stack context pulled from GitHub (`tech_stack`)
 -   Confidence thresholds
 -   Review mode (shadow / active)
--   Whether draft PRs get reviewed (`review_drafts`, off by default)
+-   Whether draft PRs are skipped (`skip_drafts`, off by default)
 -   Whether a clean PR gets a real **Approved** review (`approve_reviews`)
 
 See `.argus/config.yml.example`.
@@ -286,15 +286,16 @@ different model; commit the config file once you've settled on one.
 
 ### Draft PRs
 
-Draft PRs are skipped entirely by default — no model calls, no review, just a
-one-line log saying so. A draft is work in progress, and reviewing every push
-to one spends tokens on code the author already knows is unfinished. The PR
-gets its first review on the first push after it's marked ready.
+Draft PRs are reviewed like any other PR by default. If reviewing every push
+to a draft would spend tokens on code the author already knows is unfinished,
+set `skip_drafts: true` in `.argus/config.yml` (or the Action's `skip-drafts`
+input / the CLI's `--skip-drafts` flag). A draft is then skipped entirely — no
+model calls, no review, just a one-line log saying so — and gets its first
+review on the first push after it's marked ready.
 
-Set `review_drafts: true` in `.argus/config.yml` (or the Action's
-`review-drafts` input / the CLI's `--review-drafts` flag) to review drafts
-too. If the draft-status lookup itself fails, Argus reviews anyway rather
-than silently skipping a ready PR over a transient API error.
+With skipping on, the draft-status lookup fails open: if it errors, Argus
+reviews anyway rather than silently skipping a ready PR over a transient API
+blip.
 
 ### OpenRouter fallback models
 
