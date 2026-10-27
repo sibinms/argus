@@ -402,13 +402,31 @@ def _mock_github_review_path(monkeypatch, review_calls):
     monkeypatch.setattr(cli, "post_to_github", lambda *a, **k: None)
 
 
-def test_draft_pr_is_skipped_without_any_model_calls(monkeypatch):
+def test_draft_pr_is_reviewed_by_default(monkeypatch):
+    review_calls: list = []
+    _mock_github_review_path(monkeypatch, review_calls)
+
+    def boom(*a, **k):
+        raise AssertionError("draft status should not even be checked unless skip_drafts is on")
+
+    monkeypatch.setattr(cli, "pr_is_draft", boom)
+
+    runner = CliRunner()
+    result = runner.invoke(cli.main, ["review", "--github", "--repo", "o/r", "--pr", "7"])
+
+    assert result.exit_code == 0
+    assert len(review_calls) == 1
+
+
+def test_skip_drafts_flag_skips_a_draft_without_any_model_calls(monkeypatch):
     review_calls: list = []
     _mock_github_review_path(monkeypatch, review_calls)
     monkeypatch.setattr(cli, "pr_is_draft", lambda *a, **k: True)
 
     runner = CliRunner()
-    result = runner.invoke(cli.main, ["review", "--github", "--repo", "o/r", "--pr", "7"])
+    result = runner.invoke(
+        cli.main, ["review", "--github", "--repo", "o/r", "--pr", "7", "--skip-drafts"]
+    )
 
     # Exit 0, not an error: skipping is the configured behaviour, and a
     # non-zero exit would show a red X on every draft push.
@@ -417,35 +435,31 @@ def test_draft_pr_is_skipped_without_any_model_calls(monkeypatch):
     assert review_calls == []
 
 
-def test_review_drafts_flag_reviews_a_draft(monkeypatch):
-    review_calls: list = []
-    _mock_github_review_path(monkeypatch, review_calls)
-
-    def boom(*a, **k):
-        raise AssertionError("draft status should not even be checked with --review-drafts")
-
-    monkeypatch.setattr(cli, "pr_is_draft", boom)
-
-    runner = CliRunner()
-    result = runner.invoke(
-        cli.main, ["review", "--github", "--repo", "o/r", "--pr", "7", "--review-drafts"]
-    )
-
-    assert result.exit_code == 0
-    assert len(review_calls) == 1
-
-
-def test_review_drafts_config_key_reviews_a_draft(tmp_path, monkeypatch):
+def test_skip_drafts_config_key_skips_a_draft(tmp_path, monkeypatch):
     review_calls: list = []
     _mock_github_review_path(monkeypatch, review_calls)
     monkeypatch.setattr(cli, "pr_is_draft", lambda *a, **k: True)
     config_path = tmp_path / "config.yml"
-    config_path.write_text("review_drafts: true\n")
+    config_path.write_text("skip_drafts: true\n")
 
     runner = CliRunner()
     result = runner.invoke(
         cli.main,
         ["review", "--github", "--repo", "o/r", "--pr", "7", "--config", str(config_path)],
+    )
+
+    assert result.exit_code == 0
+    assert review_calls == []
+
+
+def test_skip_drafts_still_reviews_a_ready_pr(monkeypatch):
+    review_calls: list = []
+    _mock_github_review_path(monkeypatch, review_calls)
+    monkeypatch.setattr(cli, "pr_is_draft", lambda *a, **k: False)
+
+    runner = CliRunner()
+    result = runner.invoke(
+        cli.main, ["review", "--github", "--repo", "o/r", "--pr", "7", "--skip-drafts"]
     )
 
     assert result.exit_code == 0
