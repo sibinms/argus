@@ -29,7 +29,7 @@ on your pull requests.
 -   🔍 Eight parallel specialized reviewers ("lenses"), plus your own
 -   🧠 Evidence-based curator
 -   🧹 Deterministic checks that need no model at all (e.g. long inline comments → "use a docstring")
--   🤖 Bring your own LLM (OpenAI, Anthropic, Gemini, OpenRouter, any LiteLLM provider)
+-   🤖 Bring your own LLM (OpenAI, Anthropic, Gemini, OpenRouter, Straitly, any LiteLLM provider)
 -   🔒 Runs entirely in your GitHub Action or locally
 -   📝 Markdown-based custom lenses
 -   📊 Built-in recall evaluation
@@ -88,8 +88,8 @@ reviewers as plain Markdown (see [Writing Custom Lenses](#writing-custom-lenses)
 | Eight Parallel Lenses | Independent reviewers, each focused on a different problem domain, plus any you add. |
 | Evidence-Based Curation | Findings are removed only when evidence contradicts them. |
 | Deterministic Checks | Model-free rules run alongside the lenses (currently: long inline comments that belong in a docstring). No API key, skip the curator. |
-| Provider Agnostic | Works with OpenAI, Anthropic, Gemini, OpenRouter and any LiteLLM provider. |
-| Data Residency (OpenRouter) | Every OpenRouter call defaults to Zero Data Retention and no training-data collection — not configurable, so it can't be missed. |
+| Provider Agnostic | Works with OpenAI, Anthropic, Gemini, OpenRouter, Straitly and any LiteLLM provider. |
+| Data Residency | Every OpenRouter call defaults to Zero Data Retention and no training-data collection — not configurable, so it can't be missed. Straitly is zero-retention on every request by design, with nothing to configure. |
 | Custom Lenses | Create new reviewers using Markdown. |
 | Shadow Mode | Generate reports without commenting on PRs. |
 | Active Mode | Publish inline comments and review verdicts. |
@@ -110,7 +110,7 @@ the workflow, as shown below.
 **Anthropic**
 
 ``` yaml
-- uses: sibinms/argus@v1.2.38
+- uses: sibinms/argus@v1.2.39
   with:
     anthropic-api-key: ${{ secrets.ANTHROPIC_API_KEY }}
 ```
@@ -118,7 +118,7 @@ the workflow, as shown below.
 **OpenAI**
 
 ``` yaml
-- uses: sibinms/argus@v1.2.38
+- uses: sibinms/argus@v1.2.39
   env:
     OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
   with:
@@ -129,7 +129,7 @@ the workflow, as shown below.
 **Gemini**
 
 ``` yaml
-- uses: sibinms/argus@v1.2.38
+- uses: sibinms/argus@v1.2.39
   env:
     GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
   with:
@@ -140,13 +140,36 @@ the workflow, as shown below.
 **OpenRouter** — one key, hundreds of models across providers.
 
 ``` yaml
-- uses: sibinms/argus@v1.2.38
+- uses: sibinms/argus@v1.2.39
   env:
     OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
   with:
     lens-model: openrouter/anthropic/claude-3.5-haiku
     curator-model: openrouter/anthropic/claude-3.5-sonnet
 ```
+
+**Straitly** — one OpenAI-compatible key for models from Anthropic, OpenAI,
+Google, DeepSeek, Qwen and more, with [zero data retention on every
+request](https://straitly.ai/docs/data-retention): prompts and completions
+are never written to disk or logs and never used for training, with no
+header or setting to get right. Prefix any model id from
+[straitly.ai/models](https://straitly.ai/models) with `straitly/`.
+
+``` yaml
+- uses: sibinms/argus@v1.2.39
+  env:
+    STRAITLY_API_KEY: ${{ secrets.STRAITLY_API_KEY }}
+  with:
+    lens-model: straitly/claude-sonnet-5-fast
+    curator-model: straitly/claude-opus-5
+```
+
+`straitly/` is Argus's own prefix (LiteLLM has no entry for Straitly); Argus
+routes it through LiteLLM's generic OpenAI-compatible path at
+`https://api.straitly.ai/v1`. Set `STRAITLY_API_BASE` to point elsewhere.
+Argus reads each model's context window from Straitly's public model list,
+so the per-model input budget applies the same as for a natively known
+model. OpenRouter-style fallback lists don't apply here.
 
 Any other provider [LiteLLM](https://docs.litellm.ai/docs/providers)
 supports works the same way: that provider's env var, that provider's
@@ -164,7 +187,7 @@ both are present, so a workflow-level pick always wins for a quick test.
 ### CLI
 
 ``` bash
-pip install "git+https://github.com/sibinms/argus.git@v1.2.38"
+pip install "git+https://github.com/sibinms/argus.git@v1.2.39"
 argus init
 
 export ANTHROPIC_API_KEY=...   # or OPENAI_API_KEY, GEMINI_API_KEY, ...
@@ -199,7 +222,7 @@ steps:
     args:
       - -c
       - |
-        pip install "git+https://github.com/sibinms/argus.git@v1.2.38"
+        pip install "git+https://github.com/sibinms/argus.git@v1.2.39"
         argus review \
           --github \
           --repo $$REPO_FULL_NAME \
