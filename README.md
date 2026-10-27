@@ -156,7 +156,7 @@ header or setting to get right. Prefix any model id from
 [straitly.ai/models](https://straitly.ai/models) with `straitly/`.
 
 ``` yaml
-- uses: sibinms/argus@v1.2.37
+- uses: sibinms/argus@v1.2.38
   env:
     STRAITLY_API_KEY: ${{ secrets.STRAITLY_API_KEY }}
   with:
