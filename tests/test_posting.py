@@ -407,7 +407,7 @@ def test_reply_on_still_flagged_finding_triggers_recuration(monkeypatch):
 
     captured = {}
 
-    def fake_recurate(findings, replies, ctx, model):
+    def fake_recurate(findings, replies, ctx, model, fallbacks=None):
         captured.update(replies=replies, findings=findings)
         # Real recurate_with_replies mutates matching findings in place
         # (status/confidence/drop_reason) and never shrinks the list --
@@ -455,7 +455,7 @@ def test_reply_on_stale_finding_not_rediscovered_this_run_still_gets_recurated(m
 
     captured = {}
 
-    def fake_recurate(findings, replies, ctx, model):
+    def fake_recurate(findings, replies, ctx, model, fallbacks=None):
         captured["fingerprints"] = {ghmod._fingerprint(x) for x in findings}
         for finding in findings:
             if ghmod._fingerprint(finding) in replies:
@@ -499,7 +499,9 @@ def test_reply_on_stale_finding_kept_after_recuration_does_not_resolve_its_threa
     monkeypatch.setattr(ghmod, "_graphql_resolve_thread", lambda tid, tok: resolved.append(tid))
     # Curator considers the reply but keeps the finding -- status unchanged.
     monkeypatch.setattr(
-        ghmod, "recurate_with_replies", lambda findings, replies, ctx, model: findings
+        ghmod,
+        "recurate_with_replies",
+        lambda findings, replies, ctx, model, fallbacks=None: findings,
     )
 
     _post(findings=[], context=_ctx(changed_paths=["unrelated.py"]))
@@ -802,3 +804,74 @@ def test_commentable_lines_maps_each_file_to_its_diff_lines():
     pr.get_files.return_value = [f1, f2]
 
     assert commentable_lines(pr) == {"a.py": {1, 2}, "b.py": {5}}
+
+
+def test_graphql_raises_on_error_response(monkeypatch):
+    # GitHub's GraphQL API returns HTTP 200 with an "errors" array on
+    # failure (e.g. a token with REST write access but insufficient GraphQL
+    # scope for resolveReviewThread) -- this used to be returned as if it
+    # were a normal response, so a thread just never resolved with no sign
+    # anything had gone wrong (see #58).
+    class FakeResponse:
+        def read(self):
+            return b'{"errors": [{"message": "Resource not accessible by integration"}]}'
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+    monkeypatch.setattr(ghmod.urllib.request, "urlopen", lambda request, timeout: FakeResponse())
+
+    with pytest.raises(RuntimeError, match="Resource not accessible"):
+        ghmod._graphql("query { x }", {}, "token")
+
+
+def test_graphql_returns_body_on_success(monkeypatch):
+    class FakeResponse:
+        def read(self):
+            return b'{"data": {"x": 1}}'
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+    monkeypatch.setattr(ghmod.urllib.request, "urlopen", lambda request, timeout: FakeResponse())
+
+    assert ghmod._graphql("query { x }", {}, "token") == {"data": {"x": 1}}
+
+
+# ---- pr_is_draft ----
+
+
+def test_pr_is_draft_true_for_a_draft(monkeypatch):
+    pr = MagicMock()
+    pr.draft = True
+    gh = MagicMock()
+    gh.get_repo.return_value.get_pull.return_value = pr
+    monkeypatch.setattr(ghmod, "Github", lambda *a, **k: gh)
+    assert ghmod.pr_is_draft("o/r", 1, "tok") is True
+
+
+def test_pr_is_draft_false_for_a_ready_pr(monkeypatch):
+    pr = MagicMock()
+    pr.draft = False
+    gh = MagicMock()
+    gh.get_repo.return_value.get_pull.return_value = pr
+    monkeypatch.setattr(ghmod, "Github", lambda *a, **k: gh)
+    assert ghmod.pr_is_draft("o/r", 1, "tok") is False
+
+
+def test_pr_is_draft_fails_open_on_lookup_error(monkeypatch, caplog):
+    # Skipping drafts is a cost optimisation, not a correctness guarantee --
+    # a transient API failure must never leave a ready PR unreviewed.
+    def boom(*a, **k):
+        raise TimeoutError("network is unreachable")
+
+    monkeypatch.setattr(ghmod, "Github", boom)
+    with caplog.at_level("WARNING"):
+        assert ghmod.pr_is_draft("o/r", 1, "tok") is False
+    assert "draft" in caplog.text

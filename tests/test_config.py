@@ -17,6 +17,64 @@ def test_approve_reviews_defaults_off_and_loads_when_set(tmp_path):
     assert load_config(path).posting.approve_reviews is True
 
 
+def test_model_fallbacks_default_to_a_non_empty_list():
+    # Ships with real defaults, not [] -- switching lens/curator to an
+    # openrouter/ model gets fallback protection with no extra config.
+    assert Config().models.lens_fallbacks
+    assert Config().models.curator_fallbacks
+    assert all(m.startswith("openrouter/") for m in Config().models.lens_fallbacks)
+    assert all(m.startswith("openrouter/") for m in Config().models.curator_fallbacks)
+
+
+def test_model_fallbacks_load_an_explicit_override(tmp_path):
+    path = tmp_path / "config.yml"
+    path.write_text(
+        "models:\n"
+        "  lens_fallbacks:\n"
+        "    - openrouter/a/b\n"
+        "  curator_fallbacks:\n"
+        "    - openrouter/c/d\n"
+    )
+    config = load_config(path)
+    assert config.models.lens_fallbacks == ["openrouter/a/b"]
+    assert config.models.curator_fallbacks == ["openrouter/c/d"]
+
+
+def test_model_fallbacks_explicit_empty_list_disables_them(tmp_path):
+    path = tmp_path / "config.yml"
+    path.write_text("models:\n  lens_fallbacks: []\n  curator_fallbacks: []\n")
+    config = load_config(path)
+    assert config.models.lens_fallbacks == []
+    assert config.models.curator_fallbacks == []
+
+
+def test_model_fallbacks_absent_key_falls_back_to_the_default(tmp_path):
+    # Regression guard: a plain `or []` here would wrongly collapse "key
+    # absent from this repo's config.yml" to [], discarding the shipped
+    # defaults for every repo that hasn't set this explicitly.
+    path = tmp_path / "config.yml"
+    path.write_text("models:\n  lens: claude-haiku-4-5\n")
+    config = load_config(path)
+    assert config.models.lens_fallbacks == Config().models.lens_fallbacks
+    assert config.models.curator_fallbacks == Config().models.curator_fallbacks
+
+
+def test_max_diff_bytes_default_and_loads(tmp_path):
+    assert Config().context.max_diff_bytes == 200_000
+
+    path = tmp_path / "config.yml"
+    path.write_text("context:\n  max_diff_bytes: 500\n")
+    assert load_config(path).context.max_diff_bytes == 500
+
+
+def test_tech_stack_defaults_on_and_loads_when_disabled(tmp_path):
+    assert Config().context.tech_stack is True
+
+    path = tmp_path / "config.yml"
+    path.write_text("context:\n  tech_stack: false\n")
+    assert load_config(path).context.tech_stack is False
+
+
 def test_max_inline_comments_default_and_loads(tmp_path):
     assert Config().posting.max_inline_comments == 10
 
@@ -88,6 +146,12 @@ def test_load_config_rejects_wrong_types(tmp_path):
         ("context:\n  max_files: thirty\n", "context.max_files"),
         ("context:\n  max_bytes_per_file: big\n", "context.max_bytes_per_file"),
         ("context:\n  ignore_globs: '*.log'\n", "context.ignore_globs"),
+        ("context:\n  project_standards_files: CLAUDE.md\n", "context.project_standards_files"),
+        ("context:\n  tech_stack: yes-please\n", "context.tech_stack"),
+        ("context:\n  max_diff_bytes: big\n", "context.max_diff_bytes"),
+        ("models:\n  lens_fallbacks: openrouter/a/b\n", "models.lens_fallbacks"),
+        ("skip_drafts: maybe\n", "skip_drafts"),
+        ("models:\n  curator_fallbacks: openrouter/a/b\n", "models.curator_fallbacks"),
         ("posting:\n  max_inline_comments: ten\n", "posting.max_inline_comments"),
     ]
     for yaml_text, key in cases:
@@ -95,3 +159,54 @@ def test_load_config_rejects_wrong_types(tmp_path):
         path.write_text(yaml_text)
         with pytest.raises(ValueError, match=key):
             load_config(path)
+
+
+def test_project_standards_files_defaults_to_claude_and_agents_md():
+    assert Config().context.project_standards_files == ["CLAUDE.md", "AGENTS.md"]
+
+
+def test_project_standards_files_explicit_empty_list_disables_it(tmp_path):
+    path = tmp_path / "config.yml"
+    path.write_text("context:\n  project_standards_files: []\n")
+    assert load_config(path).context.project_standards_files == []
+
+
+def test_project_standards_files_null_falls_back_to_default_instead_of_crashing(tmp_path):
+    # Regression test: a bare "project_standards_files:" (YAML null) is the
+    # natural way to try to unset the key, mirroring how ignore_globs treats
+    # null as unset -- assigning the None straight through used to reach
+    # gather.py's `list(config.project_standards_files)` and crash every
+    # review with TypeError: 'NoneType' object is not iterable.
+    path = tmp_path / "config.yml"
+    path.write_text("context:\n  project_standards_files:\n")
+    assert load_config(path).context.project_standards_files == ["CLAUDE.md", "AGENTS.md"]
+
+
+def test_checks_default_to_all_builtin_checks_and_can_be_disabled(tmp_path):
+    from argus.config import BUILTIN_CHECKS
+
+    assert Config().checks == BUILTIN_CHECKS == ["comments"]
+    cfg = tmp_path / "c.yml"
+    cfg.write_text("checks: []\n")
+    assert load_config(cfg).checks == []
+    cfg.write_text("lenses:\n  - security\n")
+    assert load_config(cfg).checks == BUILTIN_CHECKS  # absent key keeps the default
+    cfg.write_text("checks: comments\n")
+    with pytest.raises(ValueError, match="checks"):
+        load_config(cfg)
+
+
+def test_example_and_dogfood_configs_list_all_builtin_checks():
+    from argus.config import BUILTIN_CHECKS
+
+    root = Path(__file__).parent.parent / ".argus"
+    assert set(load_config(root / "config.yml.example").checks) == set(BUILTIN_CHECKS)
+    assert set(load_config(root / "config.yml").checks) == set(BUILTIN_CHECKS)
+
+
+def test_skip_drafts_defaults_off_and_loads_when_set(tmp_path):
+    assert Config().skip_drafts is False
+
+    path = tmp_path / "config.yml"
+    path.write_text("skip_drafts: true\n")
+    assert load_config(path).skip_drafts is True

@@ -5,10 +5,18 @@
 #         while you're building trust in a new repo or a new set of lenses
 mode: active
 
+# Opt-in: set to true to skip draft PRs entirely (no model calls, no review)
+# until they're marked ready — useful where reviewing every push to a draft
+# would burn tokens on code the author already knows is unfinished. Off by
+# default, so drafts are reviewed like any other PR. Note when on: a draft
+# marked ready without a new push won't get an automatic review until its
+# next push, since CI triggers fire on pushes.
+skip_drafts: false
+
 # Any provider litellm supports works here — mix providers freely, e.g.
 # lens: gpt-4o-mini with curator: claude-opus-4-8. Set whichever provider's
 # API key as an env var (ANTHROPIC_API_KEY, OPENAI_API_KEY, GEMINI_API_KEY,
-# OPENROUTER_API_KEY, ...): https://docs.litellm.ai/docs/providers
+# OPENROUTER_API_KEY, STRAITLY_API_KEY, ...): https://docs.litellm.ai/docs/providers
 models:
   lens: claude-haiku-4-5      # cheap, high-volume — asked to over-report
   curator: claude-opus-4-8     # expensive, precise — can only drop a finding by citing evidence
@@ -16,10 +24,34 @@ models:
   # curator: gpt-4o
   # lens: gemini/gemini-3.5-flash
   # curator: gemini/gemini-3.1-pro-preview
+  # Straitly — one OpenAI-compatible key, zero data retention on every
+  # request by design (https://straitly.ai/docs/data-retention). Prefix any
+  # id from https://straitly.ai/models with straitly/ and set STRAITLY_API_KEY:
+  # lens: straitly/claude-sonnet-5-fast
+  # curator: straitly/claude-opus-5
   # OpenRouter — one key, hundreds of models. Prefix the model with openrouter/
   # and set OPENROUTER_API_KEY:
   # lens: openrouter/anthropic/claude-3.5-haiku
   # curator: openrouter/anthropic/claude-3.5-sonnet
+  #
+  # OpenRouter-only: additional models OpenRouter automatically tries, in
+  # order, if the model above errors — including a rate limit, which is
+  # exactly what this is for. Prefer a model backed by many independent
+  # inference providers (an open-weight model typically has a dozen-plus;
+  # a single vendor's own closed model usually has just a handful) — more
+  # independent backends means more capacity for OpenRouter to route around
+  # when one of them is struggling. Has no effect unless the model above
+  # uses the openrouter/ prefix, so these are a no-op with the plain
+  # Anthropic models set above — they only kick in once lens/curator are
+  # switched to openrouter/. These are ModelConfig's actual defaults
+  # (baked into the tool itself, not just this example file) — override
+  # with your own list if a different fallback chain fits better, or set
+  # to [] to disable fallbacks entirely.
+  lens_fallbacks:
+    - openrouter/z-ai/glm-4.7-flash
+  curator_fallbacks:
+    - openrouter/meta-llama/llama-4-maverick
+    - openrouter/minimax/minimax-m2.5
 
 # Built-in lenses: security, tests, error_handling, contracts, correctness,
 # deleted_code, reuse, efficiency. A shared planner call runs first and
@@ -37,9 +69,27 @@ lenses:
   - efficiency
   # - custom: .argus/lenses/payment-safety.md
 
+# Deterministic checks: plain code, no model call, no API key — they run the
+# same on every PR and their findings skip the curator (nothing to verify).
+# Configured separately from lenses so you can run either or both; with
+# `lenses: []` and only checks, a review never touches a model at all.
+#   comments — warns on any inline comment longer than one line (two or more
+#              consecutive comment lines) added in a language with a docstring idiom (Python, JS/TS,
+#              Java, Go, Rust, ...): move it into a function/class docstring.
+# Set to [] to disable.
+checks:
+  - comments
+
 context:
   max_files: 15
   max_bytes_per_file: 20000
+  # Hard ceiling on the diff itself, in bytes — independent of max_files and
+  # max_bytes_per_file above, which only bound the optional full-file dumps.
+  # A PR whose diff exceeds this gets cut at a whole-file boundary (never
+  # mid-hunk) rather than sent to the model uncapped, which matters most on
+  # a merge-commit head (skips the incremental diff, reviews the full base
+  # diff) or a very large PR — see gather.py's truncate_diff_parts.
+  max_diff_bytes: 200000
   include_neighbors: false   # off by default — usage context caused false reassurance in testing
   ignore_globs:
     - "*.lock"
@@ -48,6 +98,22 @@ context:
     - "package-lock.json"
     - "yarn.lock"
     - "pnpm-lock.yaml"
+  # Repo-root files fed to every lens, the curator, and the planner as this
+  # project's binding conventions — read from the PR's base branch, not head,
+  # so a PR can't rewrite its own review rules within the diff being
+  # reviewed. Each file is scanned for "@relative/path.md"-only lines and
+  # those are pulled in too, so an existing CLAUDE.md -> AGENTS.md ->
+  # docs/standards.md import chain reaches Argus the same way it reaches a
+  # human or another agent. Set to [] to disable.
+  project_standards_files:
+    - CLAUDE.md
+    - AGENTS.md
+  # Fetches the repo's language breakdown from GitHub (e.g. "87% Python, 9%
+  # TypeScript") and gives every lens, the curator, and the planner a
+  # one-line "# Tech stack" section — steers generic advice toward what the
+  # stack actually makes a real footgun. GitHub-only; no effect running
+  # locally against a git checkout. Set to false to disable.
+  tech_stack: true
 
 posting:
   min_confidence: medium   # low | medium | high

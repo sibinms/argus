@@ -11,6 +11,11 @@ Before any lens runs, a planner reads the PR once and writes a short brief
 context — see [How it works in the README](../README.md#architecture).
 Your lens doesn't need to ask for that brief; it's already there.
 
+If the rule you want is precise enough to state in code rather than prose
+(count these lines, match this pattern), it belongs as a deterministic
+*check* in `src/argus/checks/` instead — no model call, no curator. See
+[Deterministic checks in the README](../README.md#deterministic-checks).
+
 ## Format
 
 Plain markdown, no frontmatter, no schema. Just tell the reviewer what to

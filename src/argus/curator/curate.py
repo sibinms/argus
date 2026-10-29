@@ -99,16 +99,22 @@ def _apply_decision(finding: Finding, decision: dict, context: Context) -> Findi
     return finding
 
 
-def curate(findings: list[Finding], context: Context, model: str) -> list[Finding]:
+def curate(
+    findings: list[Finding], context: Context, model: str, fallbacks: list[str] | None = None
+) -> list[Finding]:
     deduped = dedupe(findings)
-    decisions = curate_with_model(deduped, context, model)
+    decisions = curate_with_model(deduped, context, model, fallbacks or [])
     return [
         _apply_decision(finding, decision, context) for finding, decision in zip(deduped, decisions)
     ]
 
 
 def recurate_with_replies(
-    findings: list[Finding], replies: dict[str, list[str]], context: Context, model: str
+    findings: list[Finding],
+    replies: dict[str, list[str]],
+    context: Context,
+    model: str,
+    fallbacks: list[str] | None = None,
 ) -> list[Finding]:
     """For findings whose GitHub thread has a reply from someone other than
     Argus itself, re-runs the curator with that reply folded into the
@@ -147,7 +153,7 @@ def recurate_with_replies(
     # review itself — a transient failure re-judging a handful of findings
     # shouldn't abort posting the rest of an otherwise-successful run.
     try:
-        decisions = curate_with_model(augmented, context, model)
+        decisions = curate_with_model(augmented, context, model, fallbacks or [])
     except Exception:
         logger.warning("failed to re-curate findings with replies", exc_info=True)
         return findings

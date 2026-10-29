@@ -229,6 +229,19 @@ def _last_bot_event(pr) -> str | None:
     return last
 
 
+def pr_is_draft(repo_full_name: str, pr_number: int, token: str) -> bool:
+    """Whether the PR is still a draft. Fails open: if the lookup itself
+    errors (network, auth, API blip), returns False so a legitimate ready
+    PR is never silently left unreviewed over a transient failure --
+    skipping drafts is a cost optimisation, not a correctness guarantee."""
+    try:
+        gh = Github(token, timeout=30)
+        return bool(gh.get_repo(repo_full_name).get_pull(pr_number).draft)
+    except Exception:
+        logger.warning("failed to read PR draft status, reviewing anyway", exc_info=True)
+        return False
+
+
 def last_reviewed_sha(repo_full_name: str, pr_number: int, token: str) -> str | None:
     """The commit SHA Argus's most recent formal review was posted against,
     read back from a hidden marker in that review's body. Lets a later run
@@ -284,7 +297,16 @@ def _graphql(query: str, variables: dict, token: str) -> dict:
         method="POST",
     )
     with urllib.request.urlopen(request, timeout=30) as response:  # nosec B310
-        return json.loads(response.read().decode("utf-8"))
+        body = json.loads(response.read().decode("utf-8"))
+    if "errors" in body:
+        # GitHub's GraphQL API returns HTTP 200 with an "errors" array on
+        # failure (e.g. a token with REST write access but insufficient
+        # GraphQL scope for a mutation like resolveReviewThread) -- silently
+        # returning here meant a thread just never resolved, with no sign
+        # anywhere that anything had gone wrong. Raise so callers' own
+        # best-effort try/except actually has something to catch and log.
+        raise RuntimeError(f"GitHub GraphQL request failed: {body['errors']}")
+    return body
 
 
 def _graphql_review_threads(repo_full_name: str, pr_number: int, token: str) -> list[dict]:
@@ -384,6 +406,7 @@ def post_to_github(
     posting: PostingConfig,
     context: Context,
     curator_model: str,
+    curator_fallbacks: list[str] | None = None,
 ) -> None:
     gh = Github(token, timeout=30)
     repo = gh.get_repo(repo_full_name)
@@ -412,7 +435,9 @@ def post_to_github(
         reconstructed = _reconstruct_finding(posted_inline[fp])
         if reconstructed is not None:
             stale_targets.append(reconstructed)
-    combined = recurate_with_replies(findings + stale_targets, replies, context, curator_model)
+    combined = recurate_with_replies(
+        findings + stale_targets, replies, context, curator_model, curator_fallbacks
+    )
     # Sliced back out by position rather than relied on as the same objects
     # in place — recurate_with_replies mutates its Finding objects today,
     # but this way the split is correct even if that ever changes to

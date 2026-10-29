@@ -28,7 +28,9 @@ def _patch_decisions(monkeypatch, decisions):
     # The argus.curator package re-exports the `curate` function, which shadows
     # the submodule of the same name, so fetch the real module from sys.modules.
     module = sys.modules["argus.curator.curate"]
-    monkeypatch.setattr(module, "curate_with_model", lambda findings, ctx, model: decisions)
+    monkeypatch.setattr(
+        module, "curate_with_model", lambda findings, ctx, model, fallbacks=(): decisions
+    )
 
 
 def test_drop_noise_drops_without_a_quote(monkeypatch):
@@ -72,7 +74,7 @@ def test_keep_sets_confidence(monkeypatch):
 
 
 def test_recurate_with_replies_ignores_findings_with_no_reply(monkeypatch):
-    def boom(findings, ctx, model):
+    def boom(findings, ctx, model, fallbacks=()):
         raise AssertionError("curate_with_model should not be called with no replies")
 
     module = sys.modules["argus.curator.curate"]
@@ -89,7 +91,7 @@ def test_recurate_with_replies_folds_reply_into_detail_and_reapplies_decision(mo
     fp = fingerprint(f)
     captured = {}
 
-    def fake_curate(findings, ctx, model):
+    def fake_curate(findings, ctx, model, fallbacks=()):
         captured["detail"] = findings[0].detail
         return [{"action": "drop_noise", "reason": "author explained it's intentional"}]
 
@@ -114,7 +116,7 @@ def test_recurate_with_replies_degrades_gracefully_on_curator_failure(monkeypatc
     f = _finding()
     fp = fingerprint(f)
 
-    def boom(findings, ctx, model):
+    def boom(findings, ctx, model, fallbacks=()):
         raise RuntimeError("curator API down")
 
     module = sys.modules["argus.curator.curate"]
@@ -139,7 +141,7 @@ def test_recurate_with_replies_still_requires_a_real_quote_for_drop(monkeypatch)
     monkeypatch.setattr(
         module,
         "curate_with_model",
-        lambda findings, ctx, model: [
+        lambda findings, ctx, model, fallbacks=(): [
             {"action": "drop", "reason": "trust me", "evidence_quote": "nowhere in the diff"}
         ],
     )
@@ -160,7 +162,7 @@ def test_recurate_with_replies_leaves_unmatched_findings_untouched(monkeypatch):
     monkeypatch.setattr(
         module,
         "curate_with_model",
-        lambda findings, ctx, model: [{"action": "drop_noise", "reason": "r"}],
+        lambda findings, ctx, model, fallbacks=(): [{"action": "drop_noise", "reason": "r"}],
     )
 
     out = recurate_with_replies([f1, f2], {fp1: ["a reply"]}, _ctx(), "m")

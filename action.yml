@@ -35,6 +35,29 @@ inputs:
       claude-opus-4-8). Overrides models.curator from .argus/config.yml.
     required: false
     default: ""
+  lens-model-fallbacks:
+    description: >
+      Comma-separated fallback models OpenRouter tries in order if
+      lens-model errors (rate-limited, down, ...). OpenRouter-only — has no
+      effect unless lens-model uses the openrouter/ prefix. Overrides
+      models.lens_fallbacks from .argus/config.yml.
+    required: false
+    default: ""
+  curator-model-fallbacks:
+    description: >
+      Comma-separated fallback models OpenRouter tries in order if
+      curator-model errors (rate-limited, down, ...). OpenRouter-only — has
+      no effect unless curator-model uses the openrouter/ prefix. Overrides
+      models.curator_fallbacks from .argus/config.yml.
+    required: false
+    default: ""
+  skip-drafts:
+    description: >
+      Set to "true" to skip draft PRs entirely (no model calls) until
+      they're marked ready. Off by default: drafts are reviewed like any
+      other PR. Overrides skip_drafts from .argus/config.yml.
+    required: false
+    default: ""
   pr:
     description: >
       PR number to review. Auto-detected from the GitHub event when omitted.
@@ -66,6 +89,9 @@ runs:
         ARGUS_MODE: ${{ inputs.mode }}
         ARGUS_LENS_MODEL: ${{ inputs.lens-model }}
         ARGUS_CURATOR_MODEL: ${{ inputs.curator-model }}
+        ARGUS_LENS_MODEL_FALLBACKS: ${{ inputs.lens-model-fallbacks }}
+        ARGUS_CURATOR_MODEL_FALLBACKS: ${{ inputs.curator-model-fallbacks }}
+        ARGUS_SKIP_DRAFTS: ${{ inputs.skip-drafts }}
         ARGUS_ANTHROPIC_API_KEY_INPUT: ${{ inputs.anthropic-api-key }}
         ARGUS_PR_INPUT: ${{ inputs.pr }}
       run: |
@@ -88,5 +114,14 @@ runs:
         fi
         if [ -n "$ARGUS_CURATOR_MODEL" ]; then
           args+=(--curator-model "$ARGUS_CURATOR_MODEL")
+        fi
+        if [ -n "$ARGUS_LENS_MODEL_FALLBACKS" ]; then
+          args+=(--lens-model-fallbacks "$ARGUS_LENS_MODEL_FALLBACKS")
+        fi
+        if [ -n "$ARGUS_CURATOR_MODEL_FALLBACKS" ]; then
+          args+=(--curator-model-fallbacks "$ARGUS_CURATOR_MODEL_FALLBACKS")
+        fi
+        if [ "$ARGUS_SKIP_DRAFTS" = "true" ]; then
+          args+=(--skip-drafts)
         fi
         argus review "${args[@]}"

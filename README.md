@@ -5,10 +5,11 @@
 <h1 align="center">Argus</h1>
 
 <p align="center">
-  Many narrow lenses over-report. One curator drops a finding only if it can quote the diff proving it wrong.
+  An AI PR reviewer for GitHub. Many narrow lenses over-report. One curator drops a finding only if it can quote the diff proving it wrong.
 </p>
 
 <p align="center">
+  <a href="https://github.com/marketplace/actions/argus-pr-review"><img src="https://img.shields.io/badge/GitHub%20Marketplace-Argus%20PR%20Review-blue?logo=github" alt="GitHub Marketplace" /></a>
   <a href="https://github.com/sibinms/argus/actions/workflows/ci.yml"><img src="https://github.com/sibinms/argus/actions/workflows/ci.yml/badge.svg" alt="CI status" /></a>
   <a href="https://github.com/sibinms/argus/releases"><img src="https://img.shields.io/github/v/release/sibinms/argus" alt="Latest release" /></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="License: MIT" /></a>
@@ -27,7 +28,8 @@ on your pull requests.
 -   🧭 A planner briefs every reviewer up front on intent and invariants
 -   🔍 Eight parallel specialized reviewers ("lenses"), plus your own
 -   🧠 Evidence-based curator
--   🤖 Bring your own LLM (OpenAI, Anthropic, Gemini, OpenRouter, any LiteLLM provider)
+-   🧹 Deterministic checks that need no model at all (e.g. long inline comments → "use a docstring")
+-   🤖 Bring your own LLM (OpenAI, Anthropic, Gemini, OpenRouter, Straitly, any LiteLLM provider)
 -   🔒 Runs entirely in your GitHub Action or locally
 -   📝 Markdown-based custom lenses
 -   📊 Built-in recall evaluation
@@ -85,7 +87,9 @@ reviewers as plain Markdown (see [Writing Custom Lenses](#writing-custom-lenses)
 | Planner | One cheap call reads the PR first and briefs every lens on intent, invariants and what to check. |
 | Eight Parallel Lenses | Independent reviewers, each focused on a different problem domain, plus any you add. |
 | Evidence-Based Curation | Findings are removed only when evidence contradicts them. |
-| Provider Agnostic | Works with OpenAI, Anthropic, Gemini, OpenRouter and any LiteLLM provider. |
+| Deterministic Checks | Model-free rules run alongside the lenses (currently: long inline comments that belong in a docstring). No API key, skip the curator. |
+| Provider Agnostic | Works with OpenAI, Anthropic, Gemini, OpenRouter, Straitly and any LiteLLM provider. |
+| Data Residency | Every OpenRouter call defaults to Zero Data Retention and no training-data collection — not configurable, so it can't be missed. Straitly is zero-retention on every request by design, with nothing to configure. |
 | Custom Lenses | Create new reviewers using Markdown. |
 | Shadow Mode | Generate reports without commenting on PRs. |
 | Active Mode | Publish inline comments and review verdicts. |
@@ -97,7 +101,8 @@ reviewers as plain Markdown (see [Writing Custom Lenses](#writing-custom-lenses)
 
 ### GitHub Action
 
-Pick your provider and pass that provider's key. The model itself can be
+Also listed on [GitHub Marketplace](https://github.com/marketplace/actions/argus-pr-review)
+if you'd rather browse and add it from there. Pick your provider and pass that provider's key. The model itself can be
 set either way: commit `.argus/config.yml` (see [Configuration](#configuration)),
 or skip the file entirely and pass `lens-model`/`curator-model` right in
 the workflow, as shown below.
@@ -105,7 +110,7 @@ the workflow, as shown below.
 **Anthropic**
 
 ``` yaml
-- uses: sibinms/argus@v1.2.27
+- uses: sibinms/argus@v1.2.39
   with:
     anthropic-api-key: ${{ secrets.ANTHROPIC_API_KEY }}
 ```
@@ -113,7 +118,7 @@ the workflow, as shown below.
 **OpenAI**
 
 ``` yaml
-- uses: sibinms/argus@v1.2.27
+- uses: sibinms/argus@v1.2.39
   env:
     OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
   with:
@@ -124,7 +129,7 @@ the workflow, as shown below.
 **Gemini**
 
 ``` yaml
-- uses: sibinms/argus@v1.2.27
+- uses: sibinms/argus@v1.2.39
   env:
     GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
   with:
@@ -135,13 +140,36 @@ the workflow, as shown below.
 **OpenRouter** — one key, hundreds of models across providers.
 
 ``` yaml
-- uses: sibinms/argus@v1.2.27
+- uses: sibinms/argus@v1.2.39
   env:
     OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
   with:
     lens-model: openrouter/anthropic/claude-3.5-haiku
     curator-model: openrouter/anthropic/claude-3.5-sonnet
 ```
+
+**Straitly** — one OpenAI-compatible key for models from Anthropic, OpenAI,
+Google, DeepSeek, Qwen and more, with [zero data retention on every
+request](https://straitly.ai/docs/data-retention): prompts and completions
+are never written to disk or logs and never used for training, with no
+header or setting to get right. Prefix any model id from
+[straitly.ai/models](https://straitly.ai/models) with `straitly/`.
+
+``` yaml
+- uses: sibinms/argus@v1.2.39
+  env:
+    STRAITLY_API_KEY: ${{ secrets.STRAITLY_API_KEY }}
+  with:
+    lens-model: straitly/claude-sonnet-5-fast
+    curator-model: straitly/claude-opus-5
+```
+
+`straitly/` is Argus's own prefix (LiteLLM has no entry for Straitly); Argus
+routes it through LiteLLM's generic OpenAI-compatible path at
+`https://api.straitly.ai/v1`. Set `STRAITLY_API_BASE` to point elsewhere.
+Argus reads each model's context window from Straitly's public model list,
+so the per-model input budget applies the same as for a natively known
+model. OpenRouter-style fallback lists don't apply here.
 
 Any other provider [LiteLLM](https://docs.litellm.ai/docs/providers)
 supports works the same way: that provider's env var, that provider's
@@ -159,7 +187,7 @@ both are present, so a workflow-level pick always wins for a quick test.
 ### CLI
 
 ``` bash
-pip install "git+https://github.com/sibinms/argus.git@v1.2.27"
+pip install "git+https://github.com/sibinms/argus.git@v1.2.39"
 argus init
 
 export ANTHROPIC_API_KEY=...   # or OPENAI_API_KEY, GEMINI_API_KEY, ...
@@ -194,7 +222,7 @@ steps:
     args:
       - -c
       - |
-        pip install "git+https://github.com/sibinms/argus.git@v1.2.27"
+        pip install "git+https://github.com/sibinms/argus.git@v1.2.39"
         argus review \
           --github \
           --repo $$REPO_FULL_NAME \
@@ -260,11 +288,15 @@ Use parameterized queries instead.
 
 Configure:
 
--   Models
+-   Models (and, for OpenRouter, fallback models: `lens_fallbacks`/`curator_fallbacks`)
 -   Lenses
+-   Checks (deterministic, model-free — see [Deterministic checks](#deterministic-checks))
 -   Context limits
+-   Project standards files fed to every reviewer (`project_standards_files`)
+-   Tech stack context pulled from GitHub (`tech_stack`)
 -   Confidence thresholds
 -   Review mode (shadow / active)
+-   Whether draft PRs are skipped (`skip_drafts`, off by default)
 -   Whether a clean PR gets a real **Approved** review (`approve_reviews`)
 
 See `.argus/config.yml.example`.
@@ -274,6 +306,108 @@ all — the Action's `lens-model`/`curator-model` inputs and the CLI's
 `--lens-model`/`--curator-model` flags override whatever `.argus/config.yml`
 says (or the defaults, if there's no file). Useful for a quick test of a
 different model; commit the config file once you've settled on one.
+
+### Draft PRs
+
+Draft PRs are reviewed like any other PR by default. If reviewing every push
+to a draft would spend tokens on code the author already knows is unfinished,
+set `skip_drafts: true` in `.argus/config.yml` (or the Action's `skip-drafts`
+input / the CLI's `--skip-drafts` flag). A draft is then skipped entirely — no
+model calls, no review, just a one-line log saying so — and gets its first
+review on the first push after it's marked ready.
+
+With skipping on, the draft-status lookup fails open: if it errors, Argus
+reviews anyway rather than silently skipping a ready PR over a transient API
+blip.
+
+### OpenRouter fallback models
+
+On OpenRouter, a model backed by only a handful of independent backend
+providers (a single vendor's own closed model, typically) is more exposed to
+shared-pool rate limiting than one backed by a dozen-plus — if a couple of
+those few backends go unhealthy at once, everyone routing through that model
+funnels onto whatever's left. `models.lens_fallbacks`/`models.curator_fallbacks`
+(each a list of `openrouter/`-prefixed model strings) get sent to OpenRouter
+as its own `models` fallback array alongside the primary model — OpenRouter
+tries them in order and automatically moves to the next on any error,
+**including a rate limit**, entirely server-side with no extra round trip.
+
+```yaml
+models:
+  curator: openrouter/openai/gpt-5.6-luna
+  curator_fallbacks:
+    - openrouter/meta-llama/llama-4-maverick
+    - openrouter/minimax/minimax-m2.5
+```
+
+OpenRouter-only — has no effect unless the model above it uses the
+`openrouter/` prefix. Also settable via the Action's `lens-model-fallbacks`/
+`curator-model-fallbacks` inputs or the CLI's `--lens-model-fallbacks`/
+`--curator-model-fallbacks` flags (each a comma-separated list), the same way
+`lens-model`/`curator-model` already work.
+
+Both fields ship with a non-empty default (see `.argus/config.yml.example`)
+so switching `lens`/`curator` to an `openrouter/` model gets fallback
+protection out of the box, with no extra config needed. Set either to `[]`
+to disable it for that role.
+
+### Project standards context
+
+If your repo has a `CLAUDE.md` or `AGENTS.md` at its root, Argus reads it (and
+follows any `@relative/path.md`-only line as an import, the same convention
+those files already use) and feeds the result to every lens, the curator, and
+the planner as this project's binding conventions — a lens can then cite a
+specific, stated rule from your own standards doc, not just its own general
+angle.
+
+It's read from the PR's **base branch**, never the PR's head — a PR can't
+rewrite its own review rules within the same diff being reviewed. Configure
+which files to read via `context.project_standards_files` (default
+`[CLAUDE.md, AGENTS.md]`); set it to `[]` to disable.
+
+### Tech stack context
+
+Running via the Action, Argus fetches the repo's language breakdown from
+GitHub (`GET /repos/{owner}/{repo}/languages`) and feeds it to every lens, the
+curator, and the planner as a one-line fact — e.g. `87% Python, 9%
+TypeScript`. It's cheap signal, not a framework guess: bytes-per-language,
+not "this is Django" — but it steers a lens's generic advice toward what the
+stack actually makes a real footgun, instead of treating every diff the same
+regardless of language.
+
+GitHub-only: running locally against a git checkout (`gather_local`) has no
+API to ask, so this is always empty there. Set `context.tech_stack: false` to
+disable it.
+
+### Very large PRs
+
+The diff itself has a hard ceiling, `context.max_diff_bytes` (default
+`200000`), independent of `max_files`/`max_bytes_per_file` above — those only
+bound the optional full-file dumps a lens can additionally see, not the diff
+that's always included. A PR whose diff exceeds it is cut at a whole-file
+boundary, never mid-hunk, and every prompt's `# Diff` section is marked
+`(truncated — this PR's diff was too large to include in full)` so a lens
+doesn't mistake a partial diff for the complete picture.
+
+This matters most on a PR whose head is a merge commit (skips the
+incremental-diff optimization and falls back to reviewing the full base
+diff — see the "head is a merge commit" warning in the logs) or a genuinely
+huge PR (hundreds of changed files): without this cap, the prompt sent to
+the model has no upper bound at all when the configured `lens-model`/
+`curator-model` isn't one litellm has pricing/context-window metadata for
+(a brand-new or custom model string) — the per-model token-budget check
+silently no-ops in that case, since it has nothing to trim against, and a
+large enough diff can then produce a multi-minute-plus model call that
+hangs the whole review. `max_diff_bytes` bounds the prompt regardless of
+whether the model is one litellm recognizes.
+
+As defense in depth on top of that: every model call also has a 180-second
+wall-clock ceiling independent of `completion()`'s own `timeout=` kwarg,
+which isn't reliably honored for every provider/model combination. A call
+stuck past it fails with a clear `TimeoutError` (a lens gets skipped and
+logged, the same as any other lens failure; a stuck curator call fails the
+whole run loudly, since there's no partial-curation fallback) instead of
+hanging indefinitely with no error and no progress.
 
 ### Approving pull requests
 
@@ -309,6 +443,29 @@ to say, never an invisible edit to something old:
   stays quiet.
 
 ------------------------------------------------------------------------
+
+## Deterministic checks
+
+Not every review rule needs a model. A **check** is plain code over the
+diff: it runs identically on every PR, costs nothing, needs no API key,
+and its findings skip the curator (there is nothing for a model to verify
+about "these two consecutive added lines are both comments"). Checks are
+configured separately from lenses:
+
+``` yaml
+checks:
+  - comments
+```
+
+Built-in checks:
+
+| Check | What it flags |
+| --- | --- |
+| `comments` | An inline comment longer than one line (two or more consecutive comment lines) added by the PR, in a language with a docstring or doc-comment idiom (Python, JS/TS, Java, Kotlin, Go, Rust, C/C++/C#, Swift, PHP, Ruby, …). Posts a medium-confidence warning: long inline comments are not recommended, move the explanation into the docstring of the function or class it describes (named when it can be found). Shebangs, license headers, pragmas (`# noqa`, `# type:`), doc comments, `TODO` blocks, and files with no docstring construct (YAML, shell, CI workflows, Markdown) are never flagged. |
+
+Set `checks: []` to turn them off. With `lenses: []` and only checks, a
+review never calls a model at all — handy for a repo that wants the
+deterministic rules without any provider key.
 
 ## Writing Custom Lenses
 
